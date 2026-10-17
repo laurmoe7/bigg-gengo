@@ -1,0 +1,238 @@
+// Phrases: a phrasebook of everyday sentences ("トイレはどこですか。", "〜をください。") practised as flashcards.
+// Three ways to practise (flip, type the whole sentence, fill the missing word), the same FSRS scheduling as the word cards,
+// a Browse tab to hear every sentence, and a Patterns tab where you swap words into a sentence frame. Data lives in phrasedata.js.
+// Progress is kept in S.phrases[id] (the same fields as a word: reps, stab, diff, due, box...). Loads after app.js and shares its scope.
+
+const phSlug = (s) => L.norm(s).replace(/ /g, '-');
+// the word to hide when a phrase has no chosen one: the longest word with kanji (or the longest content word)
+function phAutoFill(ja, tok) {
+  const toks = tok ? J.tokens([ja, '', tok]).filter((t) => J.hasKanji(t.s) || t.b !== t.s) : [];
+  return toks.length ? toks.reduce((a, b) => ([...b.s].length > [...a.s].length ? b : a)).s : '';
+}
+// the kana of the part of a sentence that is the hidden word (from the sentence's words), or ''
+function phFillReading(ja, tok, fill) {
+  const i = ja.indexOf(fill); if (i < 0 || !tok || !fill) return J.isKana(fill) ? J.toHira(fill) : '';
+  const toks = J.tokens([ja, '', tok]); if (toks.map((t) => t.s).join('') !== ja) return '';
+  let pos = 0, out = '';
+  for (const t of toks) { const a = pos, b = (pos += t.s.length); if (b <= i || a >= i + fill.length) continue; if (a < i || b > i + fill.length) return ''; out += t.r || t.s; }
+  return out;
+}
+let phCache = null;
+function phAll() { // every phrase, with the sentences made from the patterns at the end
+  if (phCache) return phCache;
+  const seen = new Set(), out = [];
+  const add = (p) => { p.id = phSlug(p.ja); if (!seen.has(p.id)) { seen.add(p.id); out.push(p); } };
+  PHRASES.forEach(([cat, ja, en, fill, tok]) => { fill = fill || phAutoFill(ja, tok); add({ cat, ja, en, fill, tok, kana: J.sentenceKana([ja, '', tok]), fillR: phFillReading(ja, tok, fill) }); });
+  PH_PATTERNS.forEach((pt, pi) => pt.swaps.forEach(([sn, se, sr]) => add({ cat: 'pat', ja: pt.ja.replace('{}', sn), en: pt.en.replace('{}', se), fill: sn, fillR: sr, kana: pt.frameR[0] + sr + pt.frameR[1], pat: pi, swap: [sn, sr], frame: pt.ja.split('{}') })));
+  return (phCache = out);
+}
+// a phrase with furigana
+const phHtml = (p) => (p.tok ? sentHtml(p.ja, p.tok) : p.frame ? esc(p.frame[0]) + jp(p.swap[0], p.swap[1]) + esc(p.frame[1]) : esc(p.ja));
+const phRec = (p) => (S.phrases && S.phrases[p.id]) || {};
+const phIsDue = (p) => { const r = phRec(p); return r.reps > 0 && L.isDue(r, today()); };
+const phIsNew = (p) => !phRec(p).reps;
+const phPrefs = () => {
+  const P = (S.phPrefs = Object.assign({ mode: 'flip', dir: 'en-ja', n: 20, cats: [], auto: true, retype: false, repeat: false }, S.phPrefs || {}));
+  if (P.strict) P.retype = true; // the old Strict switch became Retype (type it after a miss), which works in every mode
+  delete P.strict;
+  return P;
+};
+// Space is for converting kana on a Japanese keyboard, so it never checks an answer
+const phSpace = () => false;
+const ph = (ui.ph = ui.ph || { tab: 'practice', sess: null, bcat: 'hello', pat: {} });
+const phFilled = (pt, j) => pt.ja.replace('{}', pt.swaps[j][0]);
+
+function phGapHtml(p) { // the Japanese sentence with the hidden word as a gap (with furigana around it when the sentence has its words)
+  const f = p.fill, i = f ? p.ja.indexOf(f) : -1;
+  if (i < 0) return phHtml(p);
+  const gap = '<span class="vt-gap">＿＿＿</span>', toks = p.tok ? J.tokens([p.ja, '', p.tok]) : null;
+  if (toks && toks.map((t) => t.s).join('') === p.ja) {
+    let pos = 0, done = false, out = '', clean = true;
+    for (const t of toks) { const a = pos, b = (pos += t.s.length); if (b <= i || a >= i + f.length) out += J.rubyHtml(t.s, t.r, esc); else if (a >= i && b <= i + f.length) { if (!done) { out += gap; done = true; } } else clean = false; }
+    if (clean) return out;
+  }
+  return esc(p.ja.slice(0, i)) + gap + esc(p.ja.slice(i + f.length));
+}
+function phJudge(kind, typed, p) { // right | close (a typo, or the reading instead of the kanji counted as close only by strict setting) | wrong
+  const t = J.norm(typed); if (!t) return 'wrong';
+  const targets = (kind === 'fill' ? [p.fill, p.fillR] : [p.ja, p.kana]).filter(Boolean).map(J.norm);
+  if (targets.includes(t)) return 'right';
+  return targets.some((a) => [...a].length > 3 && J.lev(t, a) <= ([...a].length > 16 ? 2 : 1)) ? 'close' : 'wrong';
+}
+
+// ---------- starting a session ----------
+const phSel = () => { const P = phPrefs(); return phAll().filter((p) => !P.cats.length || P.cats.includes(p.cat)); };
+const phNewLeft = () => Math.max(0, S.settings.newPerDay - (todayStats().newPhrases || 0)); // new phrases still allowed today, like the new words
+function phPool(kind) {
+  const P = phPrefs(), items = phSel();
+  if (kind === 'mix') return L.pick(items, P.n);
+  if (kind === 'new') return items.filter(phIsNew).slice(0, P.n);
+  if (kind === 'ahead') return items.filter((p) => phRec(p).reps > 0 && !phIsDue(p)).sort((x, y) => (phRec(x).due || '').localeCompare(phRec(y).due || '')).slice(0, P.n);
+  return L.shuffle(items.filter(phIsDue)).slice(0, 300).concat(items.filter(phIsNew).slice(0, phNewLeft()));
+}
+function phStart(items, label) {
+  if (!items.length) return toast('Nothing to practise there yet. Try another group or the random mix!');
+  const P = phPrefs();
+  ph.sess = {
+    queue: items.map((p) => ({ id: p.id, kind: P.mode === 'fill' ? (p.fill ? 'fill' : 'type') : P.mode, dir: P.mode !== 'flip' ? 'en-ja' : P.dir === 'mixed' ? rnd(['ja-en', 'en-ja']) : P.dir, again: false })),
+    i: 0, flipped: false, res: null, typed: '', hint: 0, n: 0, good: 0, streak: 0, label: label || '', last: null,
+    coach: { kind: 'start', act: 'in', line: rnd(COACH.start), played: false },
+  };
+  ph.tab = 'practice'; phAutoSay(); render();
+}
+const phCur = () => { const s = ph.sess; if (!s || s.i >= s.queue.length) return null; const q = s.queue[s.i]; return { q, p: phAll().find((x) => x.id === q.id) }; };
+function phAutoSay() { const c = phCur(); if (c && phPrefs().auto && c.q.kind === 'flip' && c.q.dir === 'ja-en') speak(c.p.ja); }
+
+// ---------- the screens ----------
+// Phrases live on the Flashcards page as a second folder tab next to your words
+const phTabs = () => `<div class="seg">${[['practice', '🃏 Practise'], ['browse', '📖 Browse'], ['patterns', '🧩 Patterns']].map(([id, n]) => `<button class="${ph.tab === id ? 'on' : ''}" data-act="ph-tab" data-v="${id}">${n}</button>`).join('')}</div>`;
+const cardsTabs = () => `<div class="tabs">${[['words', '🃏 My words'], ['phrases', '💬 Phrases']].map(([id, n]) => `<button class="tab ${(ui.cardsTab || 'words') === id ? 'on' : ''}" data-act="cards-tab" data-v="${id}">${n}</button>`).join('')}</div>`;
+function phrasesPage() {
+  if (ph.sess) return phSession();
+  const head = '<div class="top"><div><h1>Flashcards</h1></div></div>';
+  return head + `<div class="tabrow">${cardsTabs()}${phTabs()}</div>` + (ph.tab === 'browse' ? phBrowse() : ph.tab === 'patterns' ? phPatterns() : phStartScreen());
+}
+const phPrevCards = VIEWS.cards;
+VIEWS.cards = () => {
+  if (ui.cards) return phPrevCards();
+  if (ui.cardsTab === 'phrases') return phrasesPage();
+  const html = phPrevCards(), i = html.indexOf('<div class="fc-wrap">');
+  return i < 0 ? html : html.slice(0, i) + cardsTabs() + html.slice(i);
+};
+function phStartScreen() { // laid out like the start page of the word cards: options, then Bigg with Start, then "Want to do more?"
+  const P = phPrefs(), sel = phSel(), due = sel.filter(phIsDue).length, fresh = sel.filter(phIsNew).length, ahead = sel.filter((p) => phRec(p).reps > 0 && !phIsDue(p)).length;
+  const ready = due + Math.min(fresh, phNewLeft()), flip = P.mode === 'flip';
+  const modeBtn = (v, label) => `<button class="ghost ${P.mode === v ? 'on' : ''}" data-act="ph-pref" data-k="mode" data-v="${v}">${label}</button>`;
+  const dirBtn = (v, label) => `<button class="ghost ${(flip ? P.dir : 'en-ja') === v ? 'on' : ''}" data-act="ph-pref" data-k="dir" data-v="${v}" ${flip ? '' : 'disabled'}>${label}</button>`;
+  const sw = (on, k, label, off, tip) => `<button class="switch ${on ? 'on' : ''}" role="switch" aria-checked="${on}" data-act="ph-pref" data-k="${k}" data-v="${on ? '' : '1'}" ${off ? 'disabled' : ''} title="${tip}"><i></i>${label}</button>`;
+  const MODE_INFO = { flip: 'See the sentence, flip it, then rate how well you knew it.', type: 'You see the English and type the whole Japanese sentence in kana, kanji or romaji. Spaces and punctuation do not matter.', fill: 'The Japanese sentence is shown with one word missing; type that word. A few very short phrases are typed in full.' };
+  const prefs = `<div class="fopts compact">
+    <div class="og"><span class="muted">Mode</span>${modeBtn('flip', 'Flip')}${modeBtn('type', '⌨️ Type')}${modeBtn('fill', '✏️ Fill the blank')}<span class="sep"></span>${sw(P.retype, 'retype', '✍️ Retype', false, 'When you get a card wrong, you have to type the right answer before moving on')}${sw(P.repeat, 'repeat', '🔁 Repeat', false, 'A card you rate 1 or 2, or get wrong, comes back 2 or 3 cards later until you know it')}</div>
+    <div class="og"><span class="muted">Direction</span>${dirBtn('en-ja', 'EN → JA')}${dirBtn('ja-en', 'JA → EN')}${dirBtn('mixed', 'Mixed')}<span class="sep"></span>${sw(P.auto, 'auto', '🔊 Auto-speak', false, 'Say each sentence out loud')}</div>
+    <div class="og"><span class="muted">Group</span><select id="ph-cat-sel"><option value="">All phrases</option>${PH_CATS.map(([id, ic, name]) => `<option value="${id}" ${P.cats[0] === id ? 'selected' : ''}>${ic} ${esc(name)}</option>`).join('')}</select></div>
+    <div class="og hint muted">${MODE_INFO[P.mode]}</div></div>`;
+  return `<div class="fc-wrap">${prefs}
+    <div class="card" style="text-align:center;padding:30px">${pigSvg(ready ? 'happy' : 'sleep', 'pig-md', { stage: pigStage(), card: true })}
+      <p>${ready ? `<b>${ready}</b> phrases are ready. I will be right here to cheer you on!` : 'Nothing is due right now. Nice!'}</p>
+      ${ready ? '<div class="row" style="justify-content:center"><button class="primary" data-act="ph-go">Start</button></div>' : ''}
+      <div class="more"><div class="muted" style="margin-bottom:8px">Want to do more?</div>
+        <div class="row" style="justify-content:center"><label class="muted">Cards <select id="ph-n">${[10, 20, 30, 50, 100].map((n) => `<option ${P.n === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+          <button class="ghost" data-act="ph-more" data-k="new" ${fresh ? '' : 'disabled'}>🌱 New phrases <span class="muted">${fresh}</span></button>
+          <button class="ghost" data-act="ph-more" data-k="ahead" ${ahead ? '' : 'disabled'}>🔁 Review ahead <span class="muted">${ahead}</span></button>
+          <button class="ghost" data-act="ph-more" data-k="mix" ${sel.length ? '' : 'disabled'}>🎲 Random mix</button></div></div></div></div>`;
+}
+function phBrowse() {
+  const all = phAll(), cur = PH_CATS.find((c) => c[0] === ph.bcat) || PH_CATS[0];
+  const status = (p) => { const r = phRec(p); return !r.reps ? '<span class="muted" title="Not practised yet">○</span>' : r.box >= 4 ? '<span title="Well known" style="color:var(--mint)">●</span>' : '<span title="Learning" style="color:var(--butter)">◐</span>'; };
+  const rows = all.filter((p) => p.cat === cur[0]).map((p) => `<div class="dl-row"><div><b class="dl-big jp">${phHtml(p)}</b><small class="muted">${esc(p.en)}</small></div><div style="flex-direction:row;align-items:center;gap:12px">${status(p)}<button class="speak" style="position:static" data-act="say" data-t="${esc(p.ja)}" title="Listen">🔊</button></div></div>`).join('');
+  return `<div class="chips2" style="margin-bottom:12px">${PH_CATS.map(([id, ic, name]) => `<button class="chip ${cur[0] === id ? 'on' : ''}" data-act="ph-bcat" data-v="${id}">${ic} ${esc(name)}</button>`).join('')}</div>
+    <div class="card" style="max-width:820px"><h2>${cur[1]} ${esc(cur[2])}</h2>${rows}<p class="muted" style="margin:10px 0 0;font-size:13px">○ new · ◐ learning · ● well known</p></div>`;
+}
+function phPatterns() {
+  return `<p class="muted" style="margin:0 0 12px">Learn a frame once and swap words in and out. Tap a word to hear the whole sentence.</p><div class="grid g2">${PH_PATTERNS.map((pt, i) => {
+    const j = ph.pat[i] || 0, line = pt.ja.split('{}'), en = pt.en.replace('{}', pt.swaps[j][1]);
+    return `<div class="card"><div class="jp" style="font-size:24px;font-weight:900;line-height:1.5">${esc(line[0])}<span class="vt-gap" style="letter-spacing:0;color:var(--pink)">${jp(pt.swaps[j][0], pt.swaps[j][2])}</span>${esc(line[1])}</div><div class="muted" style="margin:2px 0 10px">${esc(en)}</div>
+      <div class="chips2">${pt.swaps.map((s, k) => `<button class="chip jp ${k === j ? 'on' : ''}" data-act="ph-pat" data-i="${i}" data-j="${k}" title="${esc(s[1])}">${esc(s[0])}</button>`).join('')}</div>
+      <div class="row" style="margin-top:10px"><button class="ghost" data-act="say" data-t="${esc(phFilled(pt, j))}">🔊 Hear it</button><button class="ghost" data-act="ph-pat-go" data-i="${i}">🃏 Practise these</button></div></div>`;
+  }).join('')}</div>`;
+}
+function phSession() {
+  const s = ph.sess, cur = phCur(), P = phPrefs();
+  if (!cur) {
+    const line = (s.coach && s.coach.kind === 'done' && s.coach.line) || rnd(COACH.done);
+    return `<div class="top"><h1>おわり! 🎉</h1></div><div class="fc-wrap"><div class="card" style="text-align:center;padding:30px">${pigSvg('happy', 'pig-md act-cheer', { stage: pigStage(), card: true })}
+      <h2>${s.n} phrases practised</h2><p class="muted">${s.good} right first time (${s.n ? Math.round((s.good / s.n) * 100) : 0}%). ${esc(line)}</p>
+      <div class="row" style="justify-content:center"><button class="primary" data-act="ph-end">Back to phrases</button></div></div></div>`;
+  }
+  const { q, p } = cur, kind = q.kind, typing = kind !== 'flip', jaFront = kind === 'flip' && q.dir === 'ja-en';
+  const co = s.coach || {}, act = co.played ? '' : 'act-' + co.act; co.played = true;
+  const coach = `<div class="coach">${pigSvg('happy', act, { stage: pigStage(), card: true })}<div class="cbub"><span>${esc(co.line || '')}</span>${s.last ? `<small class="lastw jp">${s.last.ok ? '✓' : '→'} ${phHtml(s.last.p)}</small>` : ''}</div></div>`;
+  const target = kind === 'fill' ? p.fill : p.ja, hintTarget = kind === 'fill' ? p.fillR || p.fill : p.kana;
+  const hintLine = `<div class="fc-hint" id="ph-hint">${s.hint ? esc(L.hintText(hintTarget, s.hint)) : ''}</div>`;
+  const front = jaFront ? `<div class="ph-big jp">${phHtml(p)}</div>${speakBtn(p.ja)}`
+    : kind === 'fill' ? `<div class="muted">${esc(p.en)}</div><div class="ph-big jp">${phGapHtml(p)}</div>${hintLine}`
+    : `<div class="ph-big">${esc(p.en)}</div><div class="muted">in Japanese</div>${kind === 'type' ? hintLine : ''}`;
+  const verdict = s.res === 'close' ? '<div class="warn">Almost! Check the kana.</div>' : s.res === 'wrong' ? `<div class="warn">${s.typed ? 'You typed: ' + esc(s.typed) : 'That is okay, here it is!'}</div>` : '';
+  const back = jaFront ? `<div class="ph-big">${esc(p.en)}</div><div class="fc-ex jp">${phHtml(p)}</div>`
+    : `<div class="ph-big jp ${s.res ? 'ans ' + s.res : ''}">${phHtml(p)}</div>${speakBtn(p.ja)}<div class="fc-ex">${esc(p.en)}</div>${verdict}`;
+  const sug = s.res === 'wrong' ? 'again' : 'good', iv = L.previewIntervals(phRec(p), today()), hk = hotkeys();
+  const grades = `<div class="grades"><button class="g-again ${sug === 'again' ? 'on' : ''}" data-act="ph-grade" data-g="again"><span class="gl"><kbd class="kbd">${keyLabel(hk.again)}</kbd>Again</span><small>today</small></button><button class="g-good" data-act="ph-grade" data-g="good"><span class="gl"><kbd class="kbd">${keyLabel(hk.good)}</kbd>Good</span><small>${iv.good}d</small></button><button class="g-easy" data-act="ph-grade" data-g="easy"><span class="gl"><kbd class="kbd">${keyLabel(hk.easy)}</kbd>Easy</span><small>${iv.easy}d</small></button></div><div class="muted keyhint">⌨ Keyboard: press ${keyLabel(hk.again)}, ${keyLabel(hk.good)} or ${keyLabel(hk.easy)} to rate</div>`;
+  const copyIn = `<p class="muted" style="text-align:center;margin:4px 0 8px">Type it once to move on 🌱</p><input type="text" class="big-in jp" id="ph-copy" data-focus data-kana data-enter="ph-copy-ok" autocomplete="off" spellcheck="false" placeholder="${esc(hintTarget)}"><div class="row" style="justify-content:center;margin-top:10px"><button class="primary" data-act="ph-copy-ok">Continue</button><button class="ghost keyed" data-act="ph-copy-skip">Skip${skipKey()}</button></div>`;
+  const controls = s.phase === 'miss' ? copyIn : s.flipped ? grades : typing
+    ? `<input type="text" class="big-in jp" id="ph-in" data-focus data-kana data-enter="ph-check" autocomplete="off" spellcheck="false" placeholder="${kind === 'fill' ? 'Type the missing word... (Enter)' : 'Type the Japanese sentence: kana, kanji or romaji... (Enter)'}"><div class="row" style="justify-content:center;margin-top:10px">${phSpace() ? '<kbd class="kbd">Space</kbd>' : ''}<button class="primary" data-act="ph-check">Check</button><button class="ghost keyed" data-act="ph-hint">💡 Hint<small class="btn-key">${typingKbd('hint')}</small></button><button class="ghost keyed" data-act="ph-skip">I don't know${skipKey()}</button></div>`
+    : `<div class="row" style="justify-content:center"><button class="primary keyed" data-act="ph-flip">Show answer<small class="btn-key">${kbdIn('flip')}</small></button></div>`;
+  const selfFlip = !typing && !s.flipped;
+  return `<div class="top"><div><h1>Phrases</h1><p class="sub">${s.i + 1} of ${s.queue.length}${s.label ? ' · ' + esc(s.label) : ''}</p></div><button class="ghost" data-act="ph-end">End session</button></div>
+    <div class="fc-wrap">${coach}<div class="bar"><i style="width:${(s.i / s.queue.length) * 100}%"></i></div>
+    <div class="fc ${s.flipped ? 'flip' : ''}" ${selfFlip ? 'data-act="ph-flip"' : ''}><div class="fc-in"><div class="fc-face">${front}${selfFlip ? '<div class="muted">click or press Space to flip</div>' : ''}</div><div class="fc-face back">${back}</div></div></div>
+    ${controls}</div>`;
+}
+
+// ---------- going through the cards ----------
+function phCopy(force) { // after a miss with Retype on: type the right answer once
+  const cur = phCur(); if (!cur || ph.sess.phase !== 'miss') return;
+  const target = cur.q.kind === 'fill' ? cur.p.fill : cur.p.ja;
+  if (!force && phJudge(cur.q.kind === 'fill' ? 'fill' : 'type', ($('#ph-copy') || {}).value || '', cur.p) !== 'right') {
+    const el = $('#ph-copy'); if (el) { el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake'); }
+    return toast('Not quite: look at the answer and try again 🌸');
+  }
+  phGrade('again', true);
+}
+function phReveal() { const s = ph.sess, c = phCur(); s.flipped = true; if (c && !(c.q.kind === 'flip' && c.q.dir === 'ja-en') && phPrefs().auto) speak(c.p.ja); render(); }
+function phGrade(g, retyped) {
+  const s = ph.sess, cur = phCur(); if (!cur) return;
+  if (g === 'again' && phPrefs().retype && !retyped) { s.flipped = true; s.phase = 'miss'; speak(cur.p.ja); render(); return; } // Retype: type the right answer before it counts
+  if (!phRec(cur.p).reps) bumpDay('newPhrases');
+  S.phrases = S.phrases || {}; S.phrases[cur.p.id] = L.grade(phRec(cur.p), g, today());
+  s.n++; if (g !== 'again' && !cur.q.again) s.good++;
+  const retry = { id: cur.q.id, kind: cur.q.kind, dir: cur.q.dir, again: true };
+  if (phPrefs().repeat) { // Repeat: a card rated 1 or 2 (or answered wrong) comes back 2 or 3 cards later; a retry rated 1 or wrong comes back again
+    if (cur.q.again ? g === 'again' || s.res === 'wrong' : g !== 'easy' || s.res === 'wrong') s.queue.splice(Math.min(s.queue.length, s.i + 2 + Math.floor(Math.random() * 2)), 0, retry);
+  } else if (g === 'again' && !cur.q.again) s.queue.push(retry);
+  chime(g === 'again' ? 'bad' : 'ok'); gainXp(g === 'again' ? XP.cardAgain : g === 'easy' ? XP.cardEasy : XP.cardGood);
+  bumpDay(g === 'again' ? 'cMiss' : 'cOk'); if (g === 'again') noteMiss(cur.p.ja, 'phrases');
+  s.last = { ok: g !== 'again', p: cur.p };
+  s.i++; if (s.queue[s.i] && s.last && s.queue[s.i].id === s.last.p.id) s.last = null; // the same card straight away: do not show its answer at the top
+  s.flipped = false; s.phase = ''; s.res = null; s.typed = ''; s.hint = 0; s.streak = g === 'again' ? 0 : s.streak + 1;
+  const mo = L.coachMoment({ grade: g, streak: s.streak, done: s.i, total: s.queue.length });
+  s.coach = { kind: mo.kind, act: mo.act, line: rnd(COACH[mo.kind]), played: false, burst: mo.burst };
+  count('reviews'); save(); phAutoSay();
+  if (!phCur()) { s.coach = { kind: 'done', act: 'cheer', line: rnd(COACH.done), played: true }; chime('goal'); confetti(); gainXp(XP.session); }
+  render(); if (s.coach.burst) burstBits(s.coach.burst);
+}
+function phCheck() {
+  const s = ph.sess, cur = phCur(); if (!cur || s.flipped) return;
+  const typed = ($('#ph-in') || {}).value || ''; if (!typed.trim()) return toast('Type something first, or press "I don\'t know"');
+  s.typed = typed.trim(); s.res = phJudge(cur.q.kind, typed, cur.p);
+  chime(s.res === 'wrong' ? 'bad' : 'ok');
+  if (s.res === 'wrong' && phPrefs().retype) { s.phase = 'miss'; speak(cur.p.ja); }
+  phReveal();
+}
+Object.assign(ACT, {
+  'cards-tab': (el) => { ui.cardsTab = el.dataset.v; render(); },
+  'ph-tab': (el) => { ph.tab = el.dataset.v; render(); },
+  'ph-bcat': (el) => { ph.bcat = el.dataset.v; render(); },
+  'ph-pref': (el) => { const P = phPrefs(), k = el.dataset.k; P[k] = ['auto', 'retype', 'repeat'].includes(k) ? !!el.dataset.v : el.dataset.v; save(); render(); },
+  'ph-go': () => phStart(phPool('due'), ''), 'ph-more': (el) => phStart(phPool(el.dataset.k), { new: 'new phrases', ahead: 'review ahead', mix: 'random mix' }[el.dataset.k]),
+  'ph-pat': (el) => { const i = +el.dataset.i, j = +el.dataset.j; ph.pat[i] = j; speak(phFilled(PH_PATTERNS[i], j)); render(); },
+  'ph-pat-go': (el) => { const pt = PH_PATTERNS[+el.dataset.i]; phStart(pt.swaps.map((_, j) => phAll().find((p) => p.id === phSlug(phFilled(pt, j)))).filter(Boolean), 'pattern'); },
+  'ph-flip': () => phReveal(), 'ph-check': phCheck, 'ph-grade': (el) => phGrade(el.dataset.g),
+  'ph-skip': () => { const s = ph.sess; s.res = 'wrong'; s.typed = ''; if (phPrefs().retype) { s.phase = 'miss'; const c = phCur(); if (c) speak(c.p.ja); } phReveal(); },
+  'ph-hint': () => { const s = ph.sess, cur = phCur(); if (!cur) return; s.hint = Math.min(2, (s.hint || 0) + 1); const h = $('#ph-hint'); if (h) h.textContent = L.hintText(cur.q.kind === 'fill' ? cur.p.fillR || cur.p.fill : cur.p.kana, s.hint); const t = $('#ph-in'); if (t) t.focus(); },
+  'ph-copy-ok': () => phCopy(false), 'ph-copy-skip': () => phCopy(true),
+  'ph-end': () => { ph.sess = null; render(); },
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'ph-cat-sel') { phPrefs().cats = e.target.value ? [e.target.value] : []; save(); render(); } if (e.target.id === 'ph-n') { phPrefs().n = +e.target.value; save(); render(); } });
+document.addEventListener('keydown', (e) => {
+  if (ui.view !== 'cards' || ui.cardsTab !== 'phrases' || !ph.sess || !phCur() || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  const s = ph.sess, c = phCur(), hk = hotkeys(), k = keyOf(e);
+  if (!s.flipped && c.q.kind === 'flip' && (k === hk.flip || e.key === 'Enter')) { e.preventDefault(); phReveal(); }
+  else if (s.phase === 'miss') return;
+  else if (s.flipped && (k === hk.again || k === hk.good || k === hk.easy)) { e.preventDefault(); phGrade(k === hk.again ? 'again' : k === hk.good ? 'good' : 'easy'); }
+  else if (s.flipped && e.key === 'Enter') { e.preventDefault(); phGrade(s.res === 'wrong' ? 'again' : 'good'); }
+  else if (k === hk.speak) speak(c.p.ja);
+  else if (k === hk.skip && !s.flipped && c.q.kind !== 'flip') { e.preventDefault(); ACT['ph-skip'](); }
+  else if (k === hk.hint && !s.flipped && c.q.kind !== 'flip') { e.preventDefault(); ACT['ph-hint'](); }
+});

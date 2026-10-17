@@ -1,0 +1,55 @@
+{
+  "name": "bigggengo",
+  "productName": "BiggGengo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cute dark Japanese learning app: flashcards, kana, worksheets, listening",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.js",
+    "dist": "electron-builder --win nsis --publish never",
+    "install:local": "node scripts/install-local.js",
+    "ship:local": "npm run dist && node scripts/install-local.js",
+    "icon": "node scripts/stamp-icon.js",
+    "shortcut": "node scripts/stamp-icon.js && powershell -ExecutionPolicy Bypass -File scripts/make-shortcut.ps1"
+  },
+  "build": {
+    "appId": "com.laurmoe.bigggengo",
+    "productName": "BiggGengo",
+    "files": [
+      "main.js",
+      "preload.js",
+      "azure.js",
+      "renderer/**/*",
+      "data/**/*",
+      "build/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "artifactName": "BiggGengo-Setup-${version}.${ext}"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "laurmoe7",
+        "repo": "bigg-gengo"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
+    "kuromoji": "^0.1.2"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}
