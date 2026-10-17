@@ -8,7 +8,7 @@ const fs = require('fs'), path = require('path'), { execFileSync } = require('ch
 const root = path.join(__dirname, '..');
 const rcedit = path.join(root, 'node_modules', 'electron-winstaller', 'vendor', 'rcedit.exe');
 const exe = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
-const icon = path.join(root, 'build', 'icon.ico');
+const icon = path.join(root, 'build', 'bigggengo-jp.ico');
 if (process.platform !== 'win32') { console.log('Only needed on Windows.'); process.exit(0); }
 for (const f of [rcedit, exe, icon]) if (!fs.existsSync(f)) { console.error('Missing: ' + f + (f === rcedit ? '\n(run "npm install" in the project folder)' : '')); process.exit(1); }
 try {

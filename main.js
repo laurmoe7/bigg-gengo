@@ -12,7 +12,7 @@ const firstInstance = app.requestSingleInstanceLock();
 if (!firstInstance) app.quit(); // the running copy is brought to the front instead (second-instance below)
 
 const dataFile = () => path.join(app.getPath('userData'), 'data.json');
-const icon = () => path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png');
+const icon = () => path.join(__dirname, 'build', process.platform === 'win32' ? 'bigggengo-jp.ico' : 'icon.png');
 let win = null, quitting = false;
 let cache = null; // last saved state (the updater reads the autoUpdate setting from it)
 
@@ -62,7 +62,7 @@ function createWindow() {
   // Run from the project folder, Windows would show the generic Electron icon on the taskbar: give the window the pig icon and
   // tell the taskbar which shortcut to use when you pin it (the same one as the desktop shortcut).
   if (process.platform === 'win32' && !app.isPackaged) {
-    try { win.setAppDetails({ appId: 'com.laurmoe.bigggengo', appIconPath: path.join(__dirname, 'build', 'icon.ico'), appIconIndex: 0, relaunchDisplayName: 'BiggGengo', relaunchCommand: '"' + process.execPath + '" "' + app.getAppPath() + '"' }); } catch {}
+    try { win.setAppDetails({ appId: 'com.laurmoe.bigggengo', appIconPath: path.join(__dirname, 'build', 'bigggengo-jp.ico'), appIconIndex: 0, relaunchDisplayName: 'BiggGengo', relaunchCommand: '"' + process.execPath + '" "' + app.getAppPath() + '"' }); } catch {}
   }
   win.webContents.on('before-input-event', (e, input) => {
     if (input.type !== 'keyDown') return;
