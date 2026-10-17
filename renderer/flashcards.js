@@ -124,7 +124,7 @@ VIEWS.cards = () => {
   const cur = curCard();
   if (!cur) {
     const line = (c.coach && c.coach.kind === 'done' && c.coach.line) || rnd(COACH.done);
-    return `<div class="top"><h1>Klaar! 🎉</h1></div><div class="fc-wrap"><div class="card" style="text-align:center;padding:30px">${pigSvg('happy', 'pig-md act-cheer', { stage: pigStage(), card: true })}
+    return `<div class="top"><h1>おわり! 🎉</h1></div><div class="fc-wrap"><div class="card" style="text-align:center;padding:30px">${pigSvg('happy', 'pig-md act-cheer', { stage: pigStage(), card: true })}
       <h2>${c.n} cards reviewed</h2><p class="muted">${c.good} remembered first time (${c.n ? Math.round((c.good / c.n) * 100) : 0}%). ${esc(line)}</p>
       <div class="row" style="justify-content:center"><button class="primary" data-act="cards-done">Back to today</button></div>
       ${moreCards()}</div></div>`;

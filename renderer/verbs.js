@@ -15,11 +15,13 @@ function vtPool(pool) {
   return out;
 }
 const VERB_KEYS = ['te', 'ta', 'nai', 'masu', 'potential', 'volitional'], ADJ_KEYS2 = ['negative', 'past', 'te', 'adverb'];
+// "A mix" at N5 keeps to the forms you meet first; "can do" and "let's" (N4) join from N4 up, and can always be picked on their own
+const mixKeys = () => ((S.settings.jlpt || 'N5') === 'N5' ? VERB_KEYS.slice(0, 4) : VERB_KEYS);
 // one question per word: the ones you miss most are picked first
 function vtBuild(words, focus, n) {
   const st = vtStats(), score = (w) => ((st[w.ja] || {}).bad || 0) * 2 - ((st[w.ja] || {}).ok || 0) + Math.random() * 2.5;
   let pool = words; if (focus === 'adj') pool = words.filter((w) => w.pos === 'adjective'); else if (focus !== 'mixed') pool = words.filter((w) => w.pos === 'verb');
-  return L.shuffle(pool.slice().sort((a, b) => score(b) - score(a)).slice(0, n)).map((w) => ({ w, key: w.pos === 'adjective' ? ADJ_KEYS2[Math.floor(Math.random() * ADJ_KEYS2.length)] : focus === 'mixed' || focus === 'adj' ? VERB_KEYS[Math.floor(Math.random() * VERB_KEYS.length)] : focus }));
+  return L.shuffle(pool.slice().sort((a, b) => score(b) - score(a)).slice(0, n)).map((w) => ({ w, key: w.pos === 'adjective' ? ADJ_KEYS2[Math.floor(Math.random() * ADJ_KEYS2.length)] : focus === 'mixed' || focus === 'adj' ? rnd(mixKeys()) : focus }));
 }
 const vtFormsOf = (w, sp) => (w.pos === 'adjective' ? J.adjForms(sp, w.vclass) : J.verbForms(sp, w.vclass));
 // the accepted answers: the form in the word's own spelling and in kana (kana, kanji and romaji typing all work)
@@ -45,7 +47,7 @@ function vtView() {
   const chip = (act, id, name, cur) => `<button class="chip ${cur === id ? 'on' : ''}" data-act="${act}" data-v="${id}">${cur === id ? '✓ ' : ''}${esc(name)}</button>`;
   const n = vtPool(s.pool).length;
   return `<div class="card" style="max-width:760px"><h2>Which words?</h2><div class="chips2">${VT_POOLS.map(([id, nm]) => chip('vt-pool', id, nm, s.pool)).join('')}</div>
-      <h2 style="margin-top:16px">What do you want to practise?</h2><div class="chips2">${VT_FOCUS.map(([id, nm]) => chip('vt-focus', id, nm, s.focus)).join('')}</div>
+      <h2 style="margin-top:16px">What do you want to practise?</h2><div class="chips2">${VT_FOCUS.map(([id, nm]) => chip('vt-focus', id, nm, s.focus)).join('')}</div>${s.focus === 'mixed' ? `<p class="muted" style="margin:6px 0 0;font-size:13px">The mix asks for ${mixKeys().map((k) => esc(J.VERB_FORM_NAMES[k])).join(', ')}${mixKeys().length < VERB_KEYS.length ? ' (your level in Settings is N5; "Can do" and "Let\'s" are on their own chips)' : ''}.</p>` : ''}
       <div class="row" style="margin-top:16px"><label class="muted">Questions <select id="vt-n">${[5, 10, 15, 20].map((k) => `<option ${s.n === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label><button class="primary" data-act="vt-go">▶ Start</button><span class="muted">${n} words to draw from</span></div>
       <p class="muted" style="margin:10px 0 0;font-size:13px">Words you get wrong come back more often. Every right answer gives a little XP. Verbs and adjectives you add on the Words page join in once the app knows how they conjugate (the dictionary Look up button fills that in).</p></div>`;
 }
@@ -63,10 +65,23 @@ function vtAnswer(typed) {
 
 // ---------- the Grammar page: cheat sheets and conjugation practice ----------
 ui.grTab = ui.grTab || 'sheets';
+// a cheat-sheet paragraph with furigana from GRAMMAR_RUBY (offsets count the text only, not the tags); a kanji that no longer matches is left as it is
+function gramRuby(html, marks) {
+  if (!marks || !marks.length) return html;
+  let out = '', pos = 0, m = 0;
+  for (let i = 0; i < html.length;) {
+    if (html[i] === '<') { const j = html.indexOf('>', i) + 1 || html.length; out += html.slice(i, j); i = j; continue; }
+    while (m < marks.length && marks[m][0] < pos) m++;
+    const k = marks[m];
+    if (k && k[0] === pos && html.startsWith(k[1], i)) { out += `<ruby>${k[1]}<rt>${k[2]}</rt></ruby>`; i += k[1].length; pos += k[1].length; m++; continue; }
+    out += html[i]; i++; pos++;
+  }
+  return out;
+}
 VIEWS.grammar = () => {
   const tabs = `<div class="tabs">${[['sheets', '🧠 Cheat sheets'], ['verbs', '🔧 Conjugation practice']].map(([id, n]) => `<button class="tab ${ui.grTab === id ? 'on' : ''}" data-act="gr-tab" data-v="${id}">${n}</button>`).join('')}</div>`;
   const head = '<div class="top"><div><h1>Grammar</h1></div></div>' + tabs;
-  return head + (ui.grTab === 'verbs' ? vtView() : `<div class="grid g2 gram">${GRAMMAR.map((g) => `<div class="card"><h3>${g.t}</h3>${g.b.map((p) => `<p>${p}</p>`).join('')}</div>`).join('')}</div>`);
+  return head + (ui.grTab === 'verbs' ? vtView() : `<div class="grid g2 gram">${GRAMMAR.map((g, gi) => `<div class="card"><h3>${g.t}</h3>${g.b.map((p, pi) => `<p>${gramRuby(p, ((typeof GRAMMAR_RUBY !== 'undefined' && GRAMMAR_RUBY[gi]) || [])[pi])}</p>`).join('')}</div>`).join('')}</div>`);
 };
 Object.assign(ACT, {
   'gr-tab': (el) => { ui.grTab = el.dataset.v; render(); },

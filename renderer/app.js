@@ -217,7 +217,7 @@ VIEWS.home = () => {
     <div class="card stat s-coral"><i class="si">🎯</i><b>${(t.reviews || 0)} / ${g}</b><span>cards today</span><div class="bar" style="margin-top:8px"><i style="width:${Math.min(100, ((t.reviews || 0) / g) * 100)}%"></i></div></div>
     <div class="card stat s-sun"><i class="si">⭐</i><b>Lv ${lv.level}</b><span>${esc(lv.title[0])}</span></div>
     <div class="card stat s-aqua"><i class="si">🃏</i><b>${due}</b><span>cards due now</span></div>
-    <div class="card stat s-mint"><i class="si">🌱</i><b>${m.learned} <small class="muted">/ ${m.total}</small></b><span>words learned (box 4+)</span></div>
+    <div class="card stat s-mint"><i class="si">🌱</i><b>${m.learned} <small class="muted">/ ${m.total}</small></b><span title="Words you have remembered over a few weeks">words learned</span></div>
   </div>
   <div class="grid g2" style="margin-top:14px">
     ${typeof mixCard === 'function' ? mixCard() : ''}
@@ -441,7 +441,7 @@ VIEWS.settings = () => {
     <div class="card"><h2>Learning</h2>
       <label class="f">Daily goal (cards)</label><input type="number" id="s-goal" min="3" max="200" value="${s.dailyGoal}" style="width:100px">
       <label class="f">New words per day</label><input type="number" id="s-new" min="0" max="50" value="${s.newPerDay}" style="width:100px">
-      <label class="f">My level (for the worksheets Claude writes)</label><select id="s-jlpt">${['N5', 'N4', 'N3', 'N2', 'N1'].map((n) => `<option ${(S.settings.jlpt || 'N5') === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
+      <label class="f">My level (JLPT N5 is about the first 6 to 12 months; sets the worksheets Claude writes and the conjugation mix)</label><select id="s-jlpt">${['N5', 'N4', 'N3', 'N2', 'N1'].map((n) => `<option ${(S.settings.jlpt || 'N5') === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
       <label class="row" style="margin-top:12px"><input type="checkbox" id="s-gloss" ${S.settings.gloss !== false ? 'checked' : ''}> Explain grammar terms when I hover over them</label>
       <label class="row" style="margin-top:6px"><input type="checkbox" id="s-romaji" ${S.settings.romaji !== false ? 'checked' : ''}> Turn romaji into kana as I type (ka → か)</label>
       <label class="row" style="margin-top:6px"><input type="checkbox" id="s-kanaok" ${S.settings.kanaOk !== false ? 'checked' : ''}> Accept the kana reading when the card has kanji</label>
