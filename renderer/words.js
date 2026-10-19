@@ -1,6 +1,7 @@
-// The Words page: tabs by kind of word, a search box, a kana strip and pages of word cards,
-// so the list stays easy to move around however big it gets. Loads after app.js and shares its scope.
-Object.assign(ui.words, { band: '0-1500', tab: 'all', sort: 'az', letter: '', page: 0, back: 'all', kind: 'noun' });
+// The My words page: tabs by kind of word, a search box, a kana strip and pages of word cards,
+// so the list stays easy to move around however big it gets, plus Blank-page recall.
+// The Dictionary page (look up and suggested words) is its own page in the sidebar. Loads after app.js and shares its scope.
+Object.assign(ui.words, { band: '0-1500', tab: 'all', sort: 'az', letter: '', page: 0, back: 'all', kind: 'noun', dtab: 'dict', sp: 0 });
 
 const WORDS_PER_PAGE = 48;
 const isNoun = (w) => w.pos === 'noun';
@@ -37,17 +38,15 @@ const wordMatches = (w, q) => {
 
 VIEWS.words = () => {
   const f = ui.words, all = liveWords(), m = L.mastery(S.words);
-  const head = `<div class="top"><div><h1>Words</h1></div></div>`;
-  const sec = f.tab === 'recall' ? 'recall' : f.tab === 'dict' || f.tab === 'suggest' ? 'dict' : 'mine';
-  const secBar = `<div class="tabs"><button class="tab ${sec === 'mine' ? 'on' : ''}" data-act="wt-sec" data-v="mine">📚 My words <small>${all.length}</small></button><button class="tab ${sec === 'dict' ? 'on' : ''}" data-act="wt-sec" data-v="dict">📖 Dictionary</button><button class="tab ${sec === 'recall' ? 'on' : ''}" data-act="wt-sec" data-v="recall">🧠 Blank-page recall</button></div>`;
+  if (f.tab === 'dict' || f.tab === 'suggest') f.tab = 'all'; // these moved to the Dictionary page
+  const head = `<div class="top"><div><h1>My words</h1></div></div>`;
+  const sec = f.tab === 'recall' ? 'recall' : 'mine';
+  const secBar = `<div class="tabs"><button class="tab ${sec === 'mine' ? 'on' : ''}" data-act="wt-sec" data-v="mine">📚 My words <small>${all.length}</small></button><button class="tab ${sec === 'recall' ? 'on' : ''}" data-act="wt-sec" data-v="recall">🧠 Blank-page recall</button></div>`;
   const tabBtn = (id, label) => `<button class="${f.tab === id ? 'on' : ''}" data-act="wt-tab" data-t="${id}">${label}</button>`;
-  const tabs = secBar + (sec === 'recall' ? '' : sec === 'mine'
-    ? `<div class="seg">${WORD_TABS.map(([id, ic, name, fn]) => tabBtn(id, `${ic} ${name} <small>${all.filter(fn).length}</small>`)).join('')}${tabBtn('add', '➕ Add manually')}</div>`
-    : `<div class="seg">${tabBtn('dict', '🔎 Look up')}${tabBtn('suggest', '💡 Suggested')}</div>`);
+  const tabs = secBar + (sec === 'recall' ? ''
+    : `<div class="seg">${WORD_TABS.map(([id, ic, name, fn]) => tabBtn(id, `${ic} ${name} <small>${all.filter(fn).length}</small>`)).join('')}${tabBtn('add', '➕ Add manually')}</div>`);
   if (f.tab === 'recall') return head + tabs + rcPage();
   if (f.tab === 'add') return head + tabs + addWordsTab();
-  if (f.tab === 'suggest') return head + tabs + suggestTab();
-  if (f.tab === 'dict') return head + tabs + dictTab();
   const def = WORD_TABS.find((t) => t[0] === f.tab) || WORD_TABS[0];
   let ws = all.filter(def[3]);
   if (f.q.trim()) ws = ws.filter((w) => wordMatches(w, f.q));
@@ -69,6 +68,12 @@ VIEWS.words = () => {
 // real example sentences for the word in the form (Tatoeba)
 const exList = () => (ui.exFound ? (ui.exFound.length ? '<div class="muted" style="margin:10px 0 4px">Tap one to use it:</div>' + ui.exFound.map((p, i) => `<button class="exs" data-act="ex-use" data-i="${i}"><b class="jp">${J.sentenceRuby(p, esc)}</b><span class="muted">${esc(p[1])}</span></button>`).join('') : '<div class="muted" style="margin-top:10px">No sentences found for that word.</div>') : '');
 
+// The Dictionary page: look up any word, or browse the common words you do not have yet
+VIEWS.dict = () => {
+  const f = ui.words, tabBtn = (id, label) => `<button class="tab ${f.dtab === id ? 'on' : ''}" data-act="dt-tab" data-t="${id}">${label}</button>`;
+  return `<div class="top"><div><h1>Dictionary</h1></div></div><div class="tabs">${tabBtn('dict', '🔎 Look up')}${tabBtn('suggest', '💡 Suggested')}</div>` + (f.dtab === 'suggest' ? suggestTab() : dictTab());
+};
+
 // Suggested words: the most common Japanese words you do not have yet
 const BANDS = [['0-500', 'Top 500'], ['0-1500', 'Top 1,500'], ['1500-3000', '1,500 – 3,000'], ['3000-6000', '3,000 – 6,000']];
 const SUG_PER_PAGE = 24;
@@ -76,13 +81,13 @@ const POS_OF = { n: 'noun', v: 'verb', a: 'adjective' };
 function suggestList() { const [lo, hi] = ui.words.band.split('-').map(Number); return L.suggestWords(FREQ, S.words, S.knownFreq, lo, hi); }
 function suggestTab() {
   const f = ui.words;
-  if (typeof FREQ === 'undefined') { loadData('freq').then(() => { if (ui.view === 'words' && f.tab === 'suggest') render(); }).catch(() => { f.sugErr = true; render(); }); return f.sugErr ? '<div class="empty">Could not load the word list.</div>' : '<div class="empty">Loading words...</div>'; }
+  if (typeof FREQ === 'undefined') { loadData('freq').then(() => { if (ui.view === 'dict' && f.dtab === 'suggest') render(); }).catch(() => { f.sugErr = true; render(); }); return f.sugErr ? '<div class="empty">Could not load the word list.</div>' : '<div class="empty">Loading words...</div>'; }
   const list = suggestList(), pages = Math.max(1, Math.ceil(list.length / SUG_PER_PAGE));
-  if (f.page >= pages) f.page = pages - 1;
-  const shown = list.slice(f.page * SUG_PER_PAGE, (f.page + 1) * SUG_PER_PAGE);
+  if (f.sp >= pages) f.sp = pages - 1;
+  const shown = list.slice(f.sp * SUG_PER_PAGE, (f.sp + 1) * SUG_PER_PAGE);
   const card = (x) => `<div class="wcard"><div class="wtop"><div class="wt"><b class="jp">${jp(x[0], x[3])}</b>${x[4] ? ` <span class="muted" style="font-size:12px">${L.POS_NAMES[x[4]] || ''}</span>` : ''}</div><button class="ghost mini" data-act="say" data-t="${esc(x[0])}" title="Listen">🔊</button></div>
     <div class="we">${esc(x[1])}</div><div class="wf"><span class="muted" style="font-size:12px" title="Rank among the most common Japanese words">#${x[2]}</span><span><button class="ghost mini" data-act="sg-know" data-w="${esc(x[0])}" title="I already know this">✓ Know it</button> <button class="primary mini" data-act="sg-add" data-w="${esc(x[0])}">➕ Add</button></span></div></div>`;
-  const pager = pages > 1 ? `<div class="pager"><button class="ghost" data-act="wt-page" data-d="-1" ${f.page === 0 ? 'disabled' : ''}>‹ Previous</button><span class="muted">Page ${f.page + 1} of ${pages} · ${list.length} words</span><button class="ghost" data-act="wt-page" data-d="1" ${f.page >= pages - 1 ? 'disabled' : ''}>Next ›</button></div>` : '';
+  const pager = pages > 1 ? `<div class="pager"><button class="ghost" data-act="sg-page" data-d="-1" ${f.sp === 0 ? 'disabled' : ''}>‹ Previous</button><span class="muted">Page ${f.sp + 1} of ${pages} · ${list.length} words</span><button class="ghost" data-act="sg-page" data-d="1" ${f.sp >= pages - 1 ? 'disabled' : ''}>Next ›</button></div>` : '';
   return `<p class="muted" style="margin:0 0 10px">The most common Japanese words that are not in your list yet (from film and TV subtitles). Adding one also finds a real example sentence for it. Meanings come from JMdict, so give them a quick check.</p>
     <div class="row wbar"><span class="chips2" style="margin:0">${BANDS.map(([v, n]) => `<button class="chip ${f.band === v ? 'on' : ''}" data-act="sg-band" data-v="${v}">${n}</button>`).join('')}</span>
     <span class="grow"></span><button class="primary" data-act="sg-addn" ${shown.length ? '' : 'disabled'}>➕ Add these ${shown.length}</button></div>
@@ -126,7 +131,7 @@ function dictResults(q) {
     <div class="wf"><span class="muted" style="font-size:12px">${how === 'form' ? esc(q.trim()) + ' is the ' + esc(formLabel(e, q)) : how === 'english' ? 'English match' : ''}</span>${haveWord(e[0], e[2]) ? '<span class="have">✓ In My words</span>' : `<button class="primary mini" data-act="dict-add" data-w="${esc(e[0])}" data-t="${e[1]}" data-r="${esc(e[2])}">➕ Add</button>`}</div></div>`).join('') + '</div>';
 }
 function dictTab() {
-  if (typeof DICT === 'undefined') { loadData('dict').then(() => { if (ui.view === 'words' && ui.words.tab === 'dict') render(); }).catch(() => {}); return '<div class="empty">Loading the dictionary...</div>'; }
+  if (typeof DICT === 'undefined') { loadData('dict').then(() => { if (ui.view === 'dict' && ui.words.dtab === 'dict') render(); }).catch(() => {}); return '<div class="empty">Loading the dictionary...</div>'; }
   return `<p class="muted" style="margin:0 0 10px">${DICT.length.toLocaleString()} Japanese entries from JMdict. Find a word, then press Add to put it in My words.</p>
     <div class="row wbar"><input type="text" class="grow" id="d-q" data-focus placeholder="Look up a Japanese or English word..." value="${esc(ui.words.dq || '')}"></div><div id="d-res">${dictResults(ui.words.dq || '')}</div>`;
 }
@@ -178,9 +183,10 @@ Object.assign(ACT, {
     $('#w-kind').value = kind; ui.words.kind = kind; ui.lookupClass = o.vclass;
     toast(r.how === 'form' ? q + ' is a form of ' + o.ja + ' (filled in for ' + o.ja + ')' : 'Filled in');
   },
-  'sg-band': (el) => { ui.words.band = el.dataset.v; ui.words.page = 0; render(); },
+  'sg-band': (el) => { ui.words.band = el.dataset.v; ui.words.sp = 0; render(); },
+  'sg-page': (el) => { ui.words.sp = Math.max(0, ui.words.sp + +el.dataset.d); render(); $('#main').scrollTop = 0; },
   'sg-add': (el) => addSuggested([el.dataset.w]),
-  'sg-addn': () => addSuggested(suggestList().slice(ui.words.page * SUG_PER_PAGE, (ui.words.page + 1) * SUG_PER_PAGE).map((x) => x[0])),
+  'sg-addn': () => addSuggested(suggestList().slice(ui.words.sp * SUG_PER_PAGE, (ui.words.sp + 1) * SUG_PER_PAGE).map((x) => x[0])),
   'sg-know': (el) => { S.knownFreq.push(el.dataset.w); save(); render(); },
   'ex-find': async () => {
     const ja = $('#w-ja').value.trim(); if (!ja) return toast('Type the Japanese word first.');
@@ -189,8 +195,9 @@ Object.assign(ACT, {
     const l = $('#ex-list'); if (l) l.innerHTML = exList();
   },
   'ex-use': (el) => { const p = ui.exFound && ui.exFound[+el.dataset.i]; if (!p) return; $('#w-ex').value = p[0]; ui.exEn = p; toast('Using that sentence'); },
-  'wt-sec': (el) => { const f = ui.words; f.tab = el.dataset.v === 'recall' ? 'recall' : el.dataset.v === 'mine' ? (f.lastMine || 'all') : (f.lastDict || 'dict'); f.page = 0; ui.edit = null; render(); $('#main').scrollTop = 0; },
-  'wt-tab': (el) => { const f = ui.words; f.tab = el.dataset.t; if (f.tab === 'dict' || f.tab === 'suggest') f.lastDict = f.tab; else f.lastMine = f.tab; f.page = 0; f.letter = ''; if (f.tab !== 'add') { ui.edit = null; f.back = f.tab; } render(); $('#main').scrollTop = 0; },
+  'wt-sec': (el) => { const f = ui.words; f.tab = el.dataset.v === 'recall' ? 'recall' : (f.lastMine || 'all'); f.page = 0; ui.edit = null; render(); $('#main').scrollTop = 0; },
+  'wt-tab': (el) => { const f = ui.words; f.tab = el.dataset.t; f.lastMine = f.tab; f.page = 0; f.letter = ''; if (f.tab !== 'add') { ui.edit = null; f.back = f.tab; } render(); $('#main').scrollTop = 0; },
+  'dt-tab': (el) => { ui.words.dtab = el.dataset.t; render(); $('#main').scrollTop = 0; },
   'wt-letter': (el) => { ui.words.letter = el.dataset.v; ui.words.page = 0; render(); },
   'wt-page': (el) => { ui.words.page = Math.max(0, ui.words.page + +el.dataset.d); render(); $('#main').scrollTop = 0; },
   'word-edit': (el) => { const f = ui.words; if (f.tab !== 'add') f.back = f.tab; ui.edit = el.dataset.id; f.tab = 'add'; render(); $('#main').scrollTop = 0; },
