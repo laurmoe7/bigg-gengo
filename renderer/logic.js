@@ -71,6 +71,71 @@
   };
   // days until the next review for each answer, to show on the buttons
   L.previewIntervals = (w, today) => ({ again: 0, good: ivOf(L.nextFsrs(w, 'good', today).s), easy: ivOf(L.nextFsrs(w, 'easy', today).s) });
+
+  // ---------- two cards per word ----------
+  // Each word has two cards, each with its own schedule: Japanese → English (recognising it, the word's own fields) and
+  // English → Japanese (producing it, kept in w.rv). A word's first card always counts for Japanese → English; its English → Japanese
+  // card can start from the next day, a few a day, the words you know best first.
+  const RV_KEYS = ['reps', 'stab', 'diff', 'last', 'due', 'box', 'lapses'];
+  L.revRec = (w) => Object.assign({ reps: 0, box: 0, due: '', lapses: 0 }, w.rv || {});
+  L.cardRec = (w, dir) => (dir === 'en-ja' && w.reps ? L.revRec(w) : w); // the schedule a card of this direction uses
+  L.gradeCard = (w, grade, today, dir) => {
+    const rec = L.cardRec(w, dir);
+    if (rec === w) return L.grade(w, grade, today);
+    const r = L.grade(rec, grade, today), rv = {};
+    RV_KEYS.forEach((k) => { if (r[k] !== undefined) rv[k] = r[k]; });
+    return Object.assign({}, w, { rv });
+  };
+  // Today's cards as [{ w, dir }]. o = { dirs: 'ja-en' | 'en-ja' | 'both', newPerDay, newToday, revPerDay, revToday }.
+  // Due reviews (lowest level first), with new words (always Japanese first) and English → Japanese cards to start spread evenly
+  // between them, so new cards are not all left for the end of a long session.
+  // A word is in it once: when both its cards are due, the one that has waited longest comes (the other waits a day).
+  L.cardQueue = (words, today, o) => {
+    const dirs = o.dirs || 'both', fwd = dirs !== 'en-ja', back = dirs !== 'ja-en', live = words.filter((w) => !w.deleted), due = [];
+    live.forEach((w) => {
+      if (!w.reps) return;
+      const r = L.revRec(w), f = fwd && L.isDue(w, today), b = back && r.reps > 0 && L.isDue(r, today);
+      if (b && (!f || (r.due || '') <= (w.due || ''))) due.push({ w, dir: 'en-ja', rec: r });
+      else if (f) due.push({ w, dir: 'ja-en', rec: w });
+    });
+    due.sort((x, y) => x.rec.box - y.rec.box || (x.rec.due || '').localeCompare(y.rec.due || ''));
+    const fresh = live.filter((w) => !w.reps).slice(0, Math.max(0, (o.newPerDay || 0) - (o.newToday || 0))).map((w) => ({ w, dir: 'ja-en' }));
+    const busy = new Set(due.map((c) => c.w.id));
+    const start = !back ? [] : live.filter((w) => w.reps > 0 && !L.revRec(w).reps && (!w.last || w.last < today) && !busy.has(w.id))
+      .sort((x, y) => (y.stab || 0) - (x.stab || 0)).slice(0, Math.max(0, (o.revPerDay || 0) - (o.revToday || 0))).map((w) => ({ w, dir: 'en-ja' }));
+    return L.spread(due.map(({ w, dir }) => ({ w, dir })), fresh.concat(start));
+  };
+  // Puts the items of `extra` evenly between the items of `base`, keeping both orders: [a b c d] + [X Y] -> [a X b c Y d]
+  L.spread = (base, extra) => {
+    if (!extra.length || !base.length) return base.concat(extra);
+    const out = [], n = base.length + extra.length, gap = n / extra.length;
+    let b = 0, e = 0;
+    for (let i = 0; i < n; i++) {
+      const wantExtra = e < extra.length && (b >= base.length || i >= Math.floor(gap * (e + 0.5)));
+      out.push(wantExtra ? extra[e++] : base[b++]);
+    }
+    return out;
+  };
+  // ---------- tricky words ----------
+  // A card missed L.TRICKY times or more that is still not strong (level under 4) keeps slipping: Bigg asks for a memory trick
+  // and offers extra practice. It stops being tricky once that card is strong again.
+  L.TRICKY = 4;
+  L.missCount = (w) => (w.lapses || 0) + (L.revRec(w).lapses || 0);
+  L.isTricky = (w) => {
+    if (!w || w.deleted || !w.reps) return false;
+    const r = L.revRec(w);
+    return ((w.lapses || 0) >= L.TRICKY && (w.box || 0) < 4) || ((r.lapses || 0) >= L.TRICKY && (r.box || 0) < 4);
+  };
+  L.trickyWords = (words) => words.filter(L.isTricky).sort((a, b) => L.missCount(b) - L.missCount(a));
+  // Cards to review ahead of schedule (not due yet), soonest first, one per word
+  L.aheadCards = (words, today, dirs) => {
+    const out = [];
+    words.filter((w) => !w.deleted && w.reps > 0).forEach((w) => {
+      const r = L.revRec(w), f = dirs !== 'en-ja' && !L.isDue(w, today), b = dirs !== 'ja-en' && r.reps > 0 && !L.isDue(r, today);
+      if (b && (!f || r.due < w.due)) out.push({ w, dir: 'en-ja', due: r.due }); else if (f) out.push({ w, dir: 'ja-en', due: w.due });
+    });
+    return out.sort((x, y) => (x.due || '').localeCompare(y.due || '')).map(({ w, dir }) => ({ w, dir }));
+  };
   L.mastery = (words) => {
     const live = words.filter((w) => !w.deleted);
     const learned = live.filter((w) => w.box >= 4).length;
@@ -300,6 +365,40 @@
     lines.push(`Rules: keep to my level; every item must stand on its own; never show the answer in the question. Write Japanese in normal script, using only kanji a learner at my level would know. For fill, order, translate and correct give the single best answer in "answer" and every other fully correct version in "alt". For mc, "answer" must equal one of "options" exactly. Mark a gap in a question with ___. "why" is one short English sentence naming the rule. "skill" must be one of: ${L.SKILLS.join(', ')}. For "write" give a model answer in "answer". Whenever the question or the answer is Japanese, add "rd": that whole Japanese text written in hiragana only (no spaces, with the gap filled in), so the app can accept answers typed in kana or romaji and show readings. Whenever the item or its answer is a full Japanese sentence, add "tr": a natural English translation of that sentence once it is correct (for translate items leave "tr" out).`);
     lines.push('JSON shape, shown with three items:\n```json\n' + JSON_SHEET + '\n```');
     return lines.join('\n\n');
+  };
+  // ---------- reading: short stories that Claude writes with your words ----------
+  // Each paragraph comes with its words: [surface, reading in hiragana, dictionary form], so the app can show furigana and look up
+  // a conjugated word by its dictionary form. They are kept in the same "surface;reading;basic|..." form as example sentences.
+  const JSON_STORY = '{"story":{"title":"にぎやかな月曜日","paragraphs":[{"ja":"月曜日に、さくらは医者に行きました。","words":[["月曜日","げつようび","月曜日"],["に","",""],["、","",""],["さくら","",""],["は","",""],["医者","いしゃ","医者"],["に","",""],["行きました","いきました","行く"],["。","",""]],"en":"On Monday, Sakura went to the doctor."}],"glossary":[{"ja":"医者","reading":"いしゃ","en":"doctor"}],"questions":[{"q":"さくらは月曜日にどこに行きましたか。","en":"Where did Sakura go on Monday?","options":["医者","学校","店"],"answer":"医者"}]}}';
+  L.STORY_LEVELS = { N5: 'JLPT N5 (very simple: です/ます, short sentences, everyday words, few kanji)', N4: 'JLPT N4 (simple sentences, て-form, past and plain forms, common kanji)', N3: 'JLPT N3 (everyday Japanese with some longer sentences)' };
+  L.STORY_LENGTHS = { short: 150, medium: 300, long: 500 };
+  L.storyPrompt = (o) => {
+    const words = (o.words || []).slice(0, 15).map((w) => w.ja + (w.reading && w.reading !== w.ja ? '（' + w.reading + '）' : '') + (w.en ? ' (' + w.en + ')' : '')).join(', ');
+    const lines = [`${LEVEL}. Please write me a short Japanese story to read inside my BiggGengo app, so reply with ONLY one JSON object in a code block and no other text.`,
+      `Level: ${L.STORY_LEVELS[o.level] || L.STORY_LEVELS.N5}. Length: about ${L.STORY_LENGTHS[o.length] || 300} characters, in ${o.length === 'short' ? '3 to 4' : o.length === 'long' ? '6 to 8' : '4 to 6'} short paragraphs.`];
+    if (o.topic) lines.push('Topic: ' + o.topic + '.');
+    if (words) lines.push('Use each of these words from my list at least once, in a natural way (other forms are fine, like past or て-forms): ' + words + '.');
+    if (o.note) lines.push('In my own words, what else I want: ' + o.note);
+    lines.push('Rules: a real little story with people, a problem and an ending, not a list of facts. Write in normal script with only kanji a learner at this level knows. Every paragraph has "ja", a natural English translation "en", and "words": the paragraph split into words and particles in order, each as [surface, reading in hiragana, dictionary form]; joined together the surfaces must give exactly "ja" (punctuation included). Leave the reading empty when the surface has no kanji, and the dictionary form empty when it is the same as the surface. "glossary": 6 to 12 words from the story I may not know yet (not the ones from my list), in dictionary form with "reading". "questions": 4 multiple-choice questions in simple Japanese about the story, 3 options each, "answer" equal to one of "options" exactly, and "en" the question in English.');
+    lines.push('JSON shape, shown with one paragraph, one glossary word and one question:\n```json\n' + JSON_STORY + '\n```');
+    return lines.join('\n\n');
+  };
+  // Reads Claude's story reply: { story } or { error }. A paragraph keeps its words (tok) only when they join up to its text exactly.
+  L.parseStory = (text) => {
+    const j = L.extractJson(text);
+    if (!j) return { error: 'I could not find a story in that text. Paste the whole reply from Claude, JSON included.' };
+    const st = j.story || j, str = (x) => String(x == null ? '' : x).trim();
+    const paragraphs = (Array.isArray(st.paragraphs) ? st.paragraphs : []).map((p) => {
+      if (typeof p === 'string') return { ja: str(p), en: '', tok: '' };
+      const ja = str(p && (p.ja || p.text)), ws = (Array.isArray(p && p.words) ? p.words : []).filter(Array.isArray).map((w) => w.map((x) => String(x == null ? '' : x).replace(/[;|]/g, '')));
+      const tok = ws.length && ws.map((w) => w[0]).join('') === ja ? ws.map((w) => [w[0], w[1] || '', w[2] || ''].join(';')).join('|') : '';
+      return { ja, en: str(p && p.en), tok };
+    }).filter((p) => p.ja);
+    if (!paragraphs.length) return { error: 'That JSON has no story paragraphs.' };
+    const glossary = (Array.isArray(st.glossary) ? st.glossary : []).map((g) => ({ ja: str(g && g.ja), reading: str(g && g.reading), en: str(g && g.en) })).filter((g) => g.ja && g.en).slice(0, 20);
+    const questions = (Array.isArray(st.questions) ? st.questions : []).map((q) => ({ q: str(q && q.q), en: str(q && q.en), options: (Array.isArray(q && q.options) ? q.options : []).map(str).filter(Boolean), answer: str(q && q.answer) }))
+      .filter((q) => q.q && q.options.length >= 2 && q.options.includes(q.answer)).slice(0, 8);
+    return { story: { title: str(st.title).slice(0, 80) || 'おはなし', paragraphs, glossary, questions } };
   };
   const RESULT_SHAPE = '{"results":[{"id":"3","verdict":"partly","correct":"明日、予約があります。","rd":"あしたよやくがあります。","explain":"One short English sentence about the rule.","tr":"Tomorrow I have an appointment.","skills":["word order"]}],"summary":{"good":"What went well.","improve":["Concrete thing 1","Concrete thing 2"],"next":"What to focus on in the next worksheet."}}';
   L.checkPrompt = (sheet, o) => {

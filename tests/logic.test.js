@@ -404,3 +404,53 @@ test('repeat: progress counts the cards you chose, plus the redos left', () => {
   assert.equal(L.sessionProgress({ queue: q, i: 4 }), '🔁 Redo · 3 of 3 done');
   assert.equal(L.sessionProgress({ queue: [{ id: 1 }, { id: 2 }], i: 1 }), '2 of 2');
 });
+
+test('two cards per word: each direction keeps its own schedule', () => {
+  const t = '2026-10-12', w = L.grade(L.newWord({ ja: '家', reading: 'いえ', en: 'house' }), 'good', t);
+  const first = L.gradeCard(L.newWord({ ja: 'x', en: 'y' }), 'good', t, 'en-ja'); // a first card always counts Japanese → English
+  assert.equal(first.reps, 1); assert.equal(first.rv, undefined);
+  const b = L.gradeCard(w, 'again', '2026-10-14', 'en-ja');
+  assert.equal(b.due, w.due); assert.equal(b.reps, 1); // Japanese → English untouched
+  assert.equal(b.rv.reps, 1); assert.equal(b.rv.lapses, 1); assert.equal(b.rv.due, '2026-10-14');
+  const c = L.gradeCard(b, 'good', '2026-10-14', 'en-ja');
+  assert.equal(c.rv.reps, 2); assert.ok(c.rv.due > '2026-10-14');
+  assert.equal(L.cardRec(c, 'ja-en'), c); assert.equal(L.cardRec(c, 'en-ja').reps, 2);
+});
+
+test('card queue: due cards, new words Japanese first, English → Japanese cards to start, spread through', () => {
+  const t = '2026-10-12', o = { dirs: 'both', newPerDay: 2, newToday: 0, revPerDay: 1, revToday: 0 };
+  const fresh = [1, 2, 3].map((i) => L.newWord({ ja: 'n' + i, en: 'x' }));
+  const seenToday = L.newWord({ ja: 'today', en: 'x', reps: 1, last: t, due: '2026-10-15', box: 1, stab: 3 });
+  const known = L.newWord({ ja: 'known', en: 'x', reps: 3, last: '2026-10-01', due: '2026-10-30', box: 4, stab: 20 });
+  const weak = L.newWord({ ja: 'weak', en: 'x', reps: 3, last: '2026-10-01', due: '2026-10-25', box: 2, stab: 5 });
+  const both = L.newWord({ ja: 'both', en: 'x', reps: 3, last: '2026-10-01', due: '2026-10-10', box: 2, rv: { reps: 2, due: '2026-10-08', box: 1 } });
+  const q = L.cardQueue([...fresh, seenToday, known, weak, both], t, o);
+  assert.deepEqual(q.map((c) => c.w.ja + ':' + c.dir), ['n1:ja-en', 'both:en-ja', 'n2:ja-en', 'known:en-ja']);
+  assert.equal(L.cardQueue([seenToday, known, both], t, Object.assign({}, o, { dirs: 'ja-en' })).map((c) => c.w.ja + ':' + c.dir).join(), 'both:ja-en');
+  assert.equal(L.cardQueue([known, both], t, Object.assign({}, o, { dirs: 'en-ja', revToday: 1 })).map((c) => c.w.ja).join(), 'both');
+  assert.deepEqual(L.aheadCards([known, weak, both], t, 'both').map((c) => c.w.ja), ['weak', 'known']);
+  assert.equal(L.spread(['a', 'b', 'c', 'd'], ['X', 'Y']).join(''), 'aXbcYd');
+});
+
+test('tricky words: 4+ misses on a card that is still weak', () => {
+  const w = (o) => L.newWord(Object.assign({ ja: 'x', en: 'y', reps: 6 }, o));
+  assert.equal(L.isTricky(w({ lapses: 4, box: 2 })), true);
+  assert.equal(L.isTricky(w({ lapses: 4, box: 4 })), false);
+  assert.equal(L.isTricky(w({ lapses: 0, box: 5, rv: { reps: 5, lapses: 5, box: 1 } })), true);
+  assert.deepEqual(L.trickyWords([w({ ja: 'a', lapses: 4, box: 1 }), w({ ja: 'b', lapses: 6, box: 1 }), w({ ja: 'c' })]).map((x) => x.ja), ['b', 'a']);
+});
+
+test('stories: prompt and reading the reply from Claude, with furigana words', () => {
+  const p = L.storyPrompt({ level: 'N4', length: 'short', topic: 'Food & restaurants', words: [{ ja: '予約', reading: 'よやく', en: 'reservation' }] });
+  assert.match(p, /JLPT N4/); assert.match(p, /about 150 characters/); assert.match(p, /予約（よやく） \(reservation\)/);
+  const story = { story: { title: '月曜日', paragraphs: [
+    { ja: '医者に行きました。', en: 'I went to the doctor.', words: [['医者', 'いしゃ', '医者'], ['に', '', ''], ['行きました', 'いきました', '行く'], ['。', '', '']] },
+    { ja: '疲れました。', en: 'I was tired.', words: [['疲れ', 'つかれ', '']] }, // does not join up: no words kept
+  ], glossary: [{ ja: '医者', reading: 'いしゃ', en: 'doctor' }], questions: [{ q: 'どこ？', options: ['医者', '店'], answer: '医者' }] } };
+  const r = L.parseStory('```json\n' + JSON.stringify(story) + '\n```').story;
+  assert.equal(r.paragraphs[0].tok, '医者;いしゃ;医者|に;;|行きました;いきました;行く|。;;');
+  assert.deepEqual(J.tokens(['', '', r.paragraphs[0].tok]).map((x) => x.b), ['医者', 'に', '行く', '。']);
+  assert.equal(r.paragraphs[1].tok, '');
+  assert.equal(r.glossary[0].reading, 'いしゃ'); assert.equal(r.questions.length, 1);
+  assert.ok(L.parseStory('nothing').error);
+});

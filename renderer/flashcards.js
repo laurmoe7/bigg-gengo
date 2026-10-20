@@ -7,10 +7,11 @@ const keyLabel = (k) => ({ ' ': 'Space', arrowleft: '←', arrowright: '→', ar
 // with Bigg as a coach: he holds a flashcard, drops in at the top when you start and reacts as you go.
 // Loads after app.js and shares its scope.
 const cardPrefs = () => {
-  const p = (S.cardPrefs = Object.assign({ mode: 'flip', dir: 'ja-en', auto: false, retype: false, repeat: false, more: 20, group: '' }, S.cardPrefs || {}));
+  const p = (S.cardPrefs = Object.assign({ mode: 'flip', dir: 'both', auto: false, retype: false, repeat: false, more: 20, group: '' }, S.cardPrefs || {}));
   if (p.mode === 'typing') { p.mode = 'type'; p.strict = true; }
   if (p.strict) { p.retype = true; } // the old Strict switch became Retype (type the word after a miss), which works in every mode
   delete p.strict;
+  if (p.dir === 'mixed') p.dir = 'both'; // Mixed (a random side) became Both (each word's two cards, each on its own schedule)
   return p;
 };
 // Space can check the typed answer when it is an English one-word answer (Space is used to convert kana on a Japanese keyboard, so it never checks Japanese)
@@ -34,7 +35,10 @@ const cardGroupFn = () => {
   return t ? t[3] : () => true;
 };
 const cardPool = () => S.words.filter((w) => !w.deleted && cardGroupFn()(w));
-const cardDue = () => L.queue(cardPool(), today(), S.settings.newPerDay, todayStats().newWords); // today's cards, from the chosen group
+// which cards' schedules the queue follows: fill the blank is always English → Japanese
+const cardDirs = () => (cardPrefs().mode === 'cloze' ? 'en-ja' : cardPrefs().dir);
+const cardQueueOpts = () => ({ dirs: cardDirs(), newPerDay: S.settings.newPerDay, newToday: todayStats().newWords, revPerDay: S.settings.newPerDay, revToday: todayStats().newRev });
+const cardDue = () => L.cardQueue(cardPool(), today(), cardQueueOpts()); // today's cards [{ w, dir }], from the chosen group
 function cardGroupSel() {
   const g = cardPrefs().group || '', live = liveWords(), lessons = {};
   live.forEach((w) => { if (w.lesson) lessons[w.lesson] = (lessons[w.lesson] || 0) + 1; });
@@ -48,13 +52,14 @@ function launchCards(pool, label) {
   if (!pool.length) return toast('Add some words first!');
   let note = '';
   if (p.mode === 'cloze') { loadData('sentences'); // only words whose example sentence contains the word can be a fill-the-blank card
-    const all = pool.length; pool = pool.filter((w) => clozeFor(w));
+    const all = pool.length; pool = pool.filter((x) => clozeFor(x.w || x));
     if (!pool.length) return toast('Fill the blank needs words with an example sentence that uses the word. Try Find examples on the Words page.');
     if (pool.length < all) note = ` (${all - pool.length} without a usable example skipped)`;
   }
-  const dirFor = () => (p.mode === 'cloze' ? 'en-ja' : p.dir === 'mixed' ? rnd(['ja-en', 'en-ja']) : p.dir);
+  // pool: cards { w, dir } from the queue, or plain words (a new word shows Japanese first; Both picks a side)
+  const dirFor = (x) => (p.mode === 'cloze' ? 'en-ja' : x.dir ? x.dir : !x.reps ? 'ja-en' : p.dir === 'both' ? rnd(['ja-en', 'en-ja']) : p.dir);
   ui.cards = {
-    queue: pool.map((w) => ({ id: w.id, dir: dirFor(), again: false, cz: p.mode === 'cloze' ? clozeFor(w) : null })), i: 0, flipped: false, res: null, typed: '', n: 0, good: 0, label: (label || '') + note,
+    queue: pool.map((x) => { const w = x.w || x; return { id: w.id, dir: dirFor(x), again: false, cz: p.mode === 'cloze' ? clozeFor(w) : null }; }), i: 0, flipped: false, res: null, typed: '', n: 0, good: 0, label: (label || '') + note,
     streak: 0, phase: 'ask', hint: 0, last: null, coach: { kind: 'start', act: 'in', line: rnd(COACH.start), played: false },
   };
   if (p.auto) autoSpeak();
@@ -70,13 +75,23 @@ function startMore(kind) {
   const n = cardPrefs().more || 20, live = cardPool();
   let pool, label;
   if (kind === 'new') { pool = live.filter((w) => !w.reps).slice(0, n); label = 'new words'; if (!pool.length) return toast('No unseen words left. Add more on the Words page!'); }
-  else if (kind === 'review') { pool = live.filter((w) => w.reps > 0 && !L.isDue(w, today())).sort((x, y) => (x.due || '').localeCompare(y.due || '')).slice(0, n); label = 'review ahead'; if (!pool.length) return toast('Nothing else to review yet.'); }
+  else if (kind === 'review') { pool = L.aheadCards(live, today(), cardDirs()).slice(0, n); label = 'review ahead'; if (!pool.length) return toast('Nothing else to review yet.'); }
   else { pool = L.pick(live, n); label = 'random mix'; }
   launchCards(pool, label);
 }
 function curCard() { const c = ui.cards; if (!c || c.i >= c.queue.length) return null; const q = c.queue[c.i]; return { q, w: S.words.find((x) => x.id === q.id) }; }
 function autoSpeak() { const c = curCard(); if (c && c.q.dir === 'ja-en' && cardPrefs().auto) speak(c.w.ja); }
 
+// The ratings a card can get. In the typing modes the app has checked the answer: wrong is Again, a slip is Again or Good,
+// right is Good or Easy. Flip mode, where you judge yourself, has all three.
+const cardGrades = () => { const r = ui.cards && ui.cards.res; return !r ? ['again', 'good', 'easy'] : r === 'wrong' ? ['again'] : r === 'close' ? ['again', 'good'] : ['good', 'easy']; };
+// Below a flipped card: your memory trick for the word, or, for a tricky word without one, a box to write one
+function trickHtml(w) {
+  if (w.trick) return `<div class="trick">💡 <b>Memory trick:</b> ${esc(w.trick)}</div>`;
+  if (!L.isTricky(w)) return '';
+  return `<div class="trick ask"><div>🧠 <b>This one keeps slipping</b> (missed ${L.missCount(w)}×). A memory trick helps: a picture, a sound-alike, a silly sentence.</div>
+    <div class="row" style="margin-top:6px"><input type="text" class="grow" id="fc-trick" autocomplete="off" placeholder="e.g. 木 (ki) looks like a tree" data-enter="trick-save" data-id="${w.id}"><button class="ghost" data-act="trick-save" data-id="${w.id}">Save</button></div></div>`;
+}
 // ---------- checking what you typed ----------
 // Old "type answer" mode (you grade yourself afterwards): right | close | wrong
 const bestCheck = (typed, w, dir) => {
@@ -88,7 +103,7 @@ const typedMatches = (typed, w, form) => { const t = J.norm(typed); if (!t) retu
 
 // ---------- the screens ----------
 const moreCards = () => { // "Do more cards", before and after a session
-  const live = cardPool(), fresh = live.filter((w) => !w.reps).length, ahead = live.filter((w) => w.reps > 0 && !L.isDue(w, today())).length;
+  const live = cardPool(), fresh = live.filter((w) => !w.reps).length, ahead = L.aheadCards(live, today(), cardDirs()).length;
   return `<div class="more"><div class="muted" style="margin-bottom:8px">Want to do more?</div>
     <div class="row" style="justify-content:center"><label class="muted">Cards <select id="fc-n">${[10, 20, 30, 50, 100].map((n) => `<option ${(cardPrefs().more || 20) === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
       <button class="ghost" data-act="cards-more" data-k="new" ${fresh ? '' : 'disabled'}>🌱 New words <span class="muted">${fresh}</span></button>
@@ -106,14 +121,15 @@ const dirChip = (d, label) => `<button class="ghost ${cardPrefs().dir === d ? 'o
 
 VIEWS.cards = () => {
   const p = cardPrefs(), c = ui.cards, due = cardDue().length;
-  const MODE_INFO = { flip: 'See the card, flip it, then rate how well you knew it.', type: 'Type your answer (English, or Japanese in kana, kanji or romaji); the app checks it, then you rate yourself.', cloze: 'Fill the missing word in its example sentence, in the form the sentence needs. Only words with an example sentence.' };
+  const MODE_INFO = { flip: 'See the card, flip it, then rate how well you knew it.', type: 'Type your answer (English, or Japanese in kana, kanji or romaji); the app checks it. Wrong is Again, and right lets you pick Good or Easy.', cloze: 'Fill the missing word in its example sentence, in the form the sentence needs. Only words with an example sentence.' };
+  const DIR_INFO = { 'ja-en': 'Only the Japanese → English cards.', 'en-ja': 'Only the English → Japanese cards (new words still show Japanese first).', both: 'Each word has two cards, Japanese → English and English → Japanese, and each comes back on its own schedule. The English → Japanese card starts the day after you first see a word.' };
   const dirBtn = (d, label) => dirChip(d, label);
   const sw = (on, k, label, off, tip) => `<button class="switch ${on ? 'on' : ''}" role="switch" aria-checked="${on}" data-act="cpref" data-k="${k}" data-v="${on ? '' : '1'}" ${off ? 'disabled' : ''} title="${tip}"><i></i>${label}</button>`;
   const prefs = `<div class="fopts compact">
     <div class="og"><span class="muted">Mode</span>${modeChip('flip', 'Flip')}${modeChip('type', '⌨️ Type')}${modeChip('cloze', '✏️ Fill the blank')}<span class="sep"></span>${sw(p.retype, 'retype', '✍️ Retype', false, 'When you get a card wrong, you have to type the right word before moving on')}${sw(p.repeat, 'repeat', '🔁 Repeat', false, 'A card you get wrong comes back a few cards later, up to 2 times')}</div>
-    <div class="og"><span class="muted">Direction</span>${dirBtn('ja-en', 'JA → EN')}${dirBtn('en-ja', 'EN → JA')}${dirBtn('mixed', 'Mixed')}<span class="sep"></span>${sw(p.auto, 'auto', '🔊 Auto-speak', false, 'Say each word out loud when it appears')}</div>
+    <div class="og"><span class="muted">Direction</span>${dirBtn('ja-en', 'JA → EN')}${dirBtn('en-ja', 'EN → JA')}${dirBtn('both', 'Both')}<span class="sep"></span>${sw(p.auto, 'auto', '🔊 Auto-speak', false, 'Say each word out loud when it appears')}</div>
     <div class="og"><span class="muted">Group</span>${cardGroupSel()}</div>
-    <div class="og hint muted">${MODE_INFO[p.mode] || MODE_INFO.flip}</div></div>`;
+    <div class="og hint muted">${MODE_INFO[p.mode] || MODE_INFO.flip} ${p.mode === 'cloze' ? 'Fill the blank follows the English → Japanese schedule.' : DIR_INFO[p.dir] || ''}</div></div>`;
   if (!c) {
     return `<div class="top"><div><h1>Flashcards</h1></div></div><div class="fc-wrap">${prefs}
       <div class="card" style="text-align:center;padding:30px">${pigSvg(due ? 'happy' : 'sleep', 'pig-md', { stage: pigStage(), card: true })}
@@ -145,14 +161,16 @@ VIEWS.cards = () => {
   const backHtml = cz ? `<div class="ph-big jp ${c.res ? 'ans ' + c.res : ''}">${czBack}</div>${speakBtn(w.example)}<div class="fc-ex"><span class="jp">${wordHtml(w)}</span> = ${esc(w.en)}</div>${czBase ? `<div class="warn">Right word, but this sentence needs <b>${esc(cz.form)}</b>.</div>` : c.res === 'close' ? '<div class="warn">Close! Check the spelling.</div>' : c.res === 'wrong' ? (c.typed || !exEnOf(w) ? `<div class="warn">${c.typed ? 'You typed: ' + esc(c.typed) : 'That is okay, here it is!'}</div>` : '') : ''}${exEnOf(w) ? `<div class="${c.res === 'wrong' && !c.typed ? 'warn' : 'cz-en'}">${esc(exEnOf(w))}</div>` : ''}`
     : `<div class="fc-big ${c.res ? 'ans ' + c.res : ''}">${ans}</div>${!jaFront ? speakBtn(wordLabel(w)) : ''}${w.example ? `<div class="fc-ex"><span class="jp">${sentHtml(w.example, w.exTok, L.findInExample(w.example, w, w.exTok))}</span>${exEnOf(w) ? '<br>' + esc(exEnOf(w)) : ''}</div>` : ''}${c.res === 'close' ? '<div class="warn">Close! Check the spelling.</div>' : c.res === 'wrong' ? `<div class="warn">You typed: ${esc(c.typed)}</div>` : ''}`;
   const sug = c.res === 'wrong' ? 'again' : 'good';
-  const iv = L.previewIntervals(w, today());
-  const hk = hotkeys(), gradeBtns = `<div class="grades"><button class="g-again ${sug === 'again' ? 'on' : ''}" data-act="grade" data-g="again"><span class="gl"><kbd class="kbd" title="Press this key">${keyLabel(hk.again)}</kbd>Again</span><small>today</small></button><button class="g-good" data-act="grade" data-g="good"><span class="gl"><kbd class="kbd" title="Press this key">${keyLabel(hk.good)}</kbd>Good</span><small>${iv.good}d</small></button><button class="g-easy" data-act="grade" data-g="easy"><span class="gl"><kbd class="kbd" title="Press this key">${keyLabel(hk.easy)}</kbd>Easy</span><small>${iv.easy}d</small></button></div><div class="muted keyhint">⌨ Keyboard: press ${keyLabel(hk.again)}, ${keyLabel(hk.good)} or ${keyLabel(hk.easy)} to rate, ${keyLabel(hk.speak)} to hear it</div>`;
+  const iv = L.previewIntervals(L.cardRec(w, q.dir), today());
+  const hk = hotkeys(), gs = cardGrades(), gBtn = (g, label, small) => (gs.includes(g) ? `<button class="g-${g} ${sug === g ? 'on' : ''}" data-act="grade" data-g="${g}"><span class="gl"><kbd class="kbd" title="Press this key">${keyLabel(hk[g])}</kbd>${label}</span><small>${small}</small></button>` : '');
+  const gradeBtns = `<div class="grades">${gBtn('again', 'Again', 'today')}${gBtn('good', 'Good', iv.good + 'd')}${gBtn('easy', 'Easy', iv.easy + 'd')}</div>${c.res === 'wrong' && c.typed ? '<div class="row" style="justify-content:center;margin-top:6px"><button class="ghost mini" data-act="grade" data-g="good" title="Your answer was right too (another meaning or spelling): count it as Good">✓ I was right</button></div>' : ''}<div class="muted keyhint">⌨ Keyboard: press ${gs.map((g) => keyLabel(hk[g])).join(gs.length > 2 ? ', ' : ' or ')} to rate, ${keyLabel(hk.speak)} to hear it</div>`;
   let controls;
+  const trick = c.flipped || c.phase === 'miss' ? trickHtml(w) : '';
   const want = cz ? cz.form : w.reading || w.ja;
   if (c.phase === 'miss') {
-    controls = `<p class="muted" style="text-align:center;margin:4px 0 8px">Type it once to move on 🌱</p><input type="text" class="big-in jp" id="copy" data-focus data-kana autocomplete="off" spellcheck="false" placeholder="${esc(want)}"><div class="row" style="justify-content:center;margin-top:10px"><button class="primary" data-act="copy-ok">Continue</button><button class="ghost keyed" data-act="copy-skip">Skip${skipKey()}</button></div>`;
+    controls = trick + `<p class="muted" style="text-align:center;margin:4px 0 8px">Type it once to move on 🌱</p><input type="text" class="big-in jp" id="copy" data-focus data-kana autocomplete="off" spellcheck="false" placeholder="${esc(want)}"><div class="row" style="justify-content:center;margin-top:10px"><button class="primary" data-act="copy-ok">Continue</button><button class="ghost keyed" data-act="copy-skip">Skip${skipKey()}</button>${c.typed ? '<button class="ghost" data-act="grade" data-g="good" title="Your answer was right too (another meaning or spelling): count it as Good">✓ I was right</button>' : ''}</div>`;
   } else {
-    controls = c.flipped ? gradeBtns : type
+    controls = c.flipped ? trick + gradeBtns : type
       ? `<input type="text" class="big-in ${jaFront ? '' : 'jp'}" id="typed" data-focus ${jaFront ? '' : 'data-kana'} autocomplete="off" spellcheck="false" placeholder="${cz ? 'Type the missing word... (Enter)' : jaFront ? 'Type the English... (Enter)' : 'Type the Japanese: kana, kanji or romaji... (Enter)'}"><div class="row" style="justify-content:center;margin-top:10px">${spaceKbd(cur)}<button class="primary" data-act="check">Check</button>${cz ? `<button class="ghost keyed" data-act="fc-hint">💡 Hint<small class="btn-key">${typingKbd('hint')}</small></button>` : ''}<button class="ghost keyed" data-act="skip">I don't know${skipKey()}</button></div>`
       : `<div class="row" style="justify-content:center"><button class="primary keyed" data-act="flip">Show answer<small class="btn-key">${kbdIn('flip')}</small></button></div>`;
   }
@@ -176,8 +194,10 @@ function burstBits(emoji) { // little emoji float up from Bigg
 function gradeCard(g, retyped) {
   const c = ui.cards, cur = curCard(); if (!cur) return;
   if (g === 'again' && cardPrefs().retype && !retyped) { c.flipped = true; c.phase = 'miss'; speak(wordLabel(cur.w)); render(); return; } // Retype: type the right word before it counts
+  if (g !== 'again' && c.res === 'wrong') c.res = 'right'; // "I was right": it counts as a right answer
   if (!cur.w.reps) L.bump(S.log, today(), 'newWords');
-  const upd = L.grade(cur.w, g, today()); S.words[S.words.indexOf(cur.w)] = upd;
+  else if (cur.q.dir === 'en-ja' && !L.revRec(cur.w).reps) L.bump(S.log, today(), 'newRev'); // a word's English → Japanese card starting
+  const upd = L.gradeCard(cur.w, g, today(), cur.q.dir); S.words[S.words.indexOf(cur.w)] = upd;
   c.n++; if (g !== 'again' && !cur.q.again) c.good++;
   if (cardPrefs().repeat) { if (g === 'again' || c.res === 'wrong') L.requeueMiss(c, cur.q, retyped); } // Repeat: only a miss comes back, a few cards later and at most twice
   else if (g === 'again' && !cur.q.again) c.queue.push(Object.assign({}, cur.q, { again: true, back: 1 }));
@@ -235,6 +255,11 @@ Object.assign(ACT, {
     render();
   },
   'fc-hint': () => { const c = ui.cards, cur = curCard(); if (!cur) return; c.hint = Math.min(2, (c.hint || 0) + 1); const h = $('#fc-hint'); if (h) h.textContent = L.hintText(cardPrefs().mode === 'cloze' && cur.q.cz ? cur.q.cz.reading || cur.q.cz.form : cur.w.reading || cur.w.ja, c.hint); const t = $('#typed'); if (t) t.focus(); },
+  'trick-save': (el) => {
+    const w = S.words.find((x) => x.id === ((el && el.dataset.id) || ($('#fc-trick') || {}).dataset.id)), v = (($('#fc-trick') || {}).value || '').trim();
+    if (!w) return; if (!v) return toast('Write a trick first.');
+    w.trick = v; save(); toast('Saved your memory trick 💡'); render();
+  },
   'copy-ok': () => copyContinue(false), 'copy-skip': () => copyContinue(true),
 });
 document.addEventListener('change', (e) => { if (e.target.id === 'fc-n') { cardPrefs().more = +e.target.value; save(); } });

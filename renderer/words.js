@@ -14,6 +14,7 @@ const WORD_TABS = [
   ['verb', '🏃', 'Verbs', isVerb],
   ['adj', '🎨', 'Adjectives', isAdj],
   ['other', '🧩', 'Other', (w) => !isNoun(w) && !isVerb(w) && !isAdj(w)],
+  ['tricky', '🧠', 'Tricky', (w) => L.isTricky(w)],
   ['hard', '🎯', 'Needs work', (w) => w.reps > 0 && w.box < 4 && (w.box <= 1 || w.lapses >= 2)],
   ['new', '🌱', 'New', (w) => !w.reps],
   ['done', '✅', 'Learned', (w) => w.box >= 4],
@@ -26,7 +27,7 @@ const sortWords = (arr, how) => (how === 'new' ? arr.slice().sort((a, b) => b.cr
 const posPill = (w) => (w.pos === 'verb' ? '<span class="pill">' + (J.verbClass(w.vclass) === 'ichidan' ? 'る-verb' : J.verbClass(w.vclass) === 'godan' ? 'う-verb' : J.verbClass(w.vclass) ? 'irregular' : 'verb') + '</span> ' : w.pos === 'adjective' ? '<span class="pill">' + (w.vclass === 'na' ? 'な-adj' : 'い-adj') + '</span> ' : '');
 
 const wordCard = (w) => `<div class="wcard"><div class="wtop"><div class="wt">${posPill(w)}<b class="jp">${wordHtml(w)}</b></div><button class="ghost mini" data-act="say" data-t="${esc(w.ja)}" title="Listen">🔊</button></div>
-  <div class="we">${esc(w.en)}</div>${w.example ? `<div class="wex jp">${sentHtml(w.example, w.exTok)}</div>` : ''}
+  <div class="we">${esc(w.en)}</div>${w.example ? `<div class="wex jp">${sentHtml(w.example, w.exTok)}</div>` : ''}${w.trick ? `<div class="wex">💡 ${esc(w.trick)}</div>` : L.isTricky(w) ? `<div class="wex"><button class="ghost mini" data-act="word-edit" data-id="${w.id}">🧠 Missed ${L.missCount(w)}×: add a memory trick</button></div>` : ''}
   <div class="wf"><span class="lvl">${[1, 2, 3, 4, 5].map((i) => `<i class="${w.box >= i ? 'on' : ''}"></i>`).join('')}</span><span><button class="ghost mini" data-act="word-edit" data-id="${w.id}" title="Edit">✎</button> <button class="ghost mini" data-act="word-del" data-id="${w.id}" title="Delete">🗑</button></span></div></div>`;
 
 // does the search text match this word? (kanji, kana, romaji or English)
@@ -160,6 +161,7 @@ function addWordsTab() {
     <button class="ghost" data-act="ex-find" title="Look up real sentences that use this word">🔎 Find examples</button>
     <button class="primary" data-act="word-save">${ed ? 'Save' : 'Add'}</button>${ed ? '<button class="ghost" data-act="word-cancel">Cancel</button>' : ''}</div>
     <p class="muted" style="margin:8px 0 0;font-size:13px">Type romaji and it turns into kana as you go (or use your Japanese keyboard). Kanji need a Japanese keyboard, or use Look up.</p>
+    <div class="row" style="margin-top:8px"><input type="text" class="grow" id="w-trick" placeholder="💡 Memory trick (optional): shown after the card is turned" value="${esc(ed ? ed.trick || '' : '')}" data-enter="word-save"></div>
     <div id="ex-list">${exList()}</div></div>
   <div class="card"><h2>Add many at once</h2>
     <p class="muted" style="margin-top:0">Paste in any of these: one word per line like <code>食べる（たべる）= to eat | 毎日ご飯を食べます。</code> (also <code>;</code>, tab or <code>-</code>, and <code>食べる; たべる; to eat</code>); a list copied from a course page, where each word is followed by a blank line and its English (with or without a <code>Start</code> in front); or the JSON Claude gave you.</p>

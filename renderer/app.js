@@ -142,7 +142,7 @@ function count(key, n) {
   if (key === 'reviews' && before < S.settings.dailyGoal && after >= S.settings.dailyGoal) { chime('goal'); confetti(); toast('Daily goal reached! Yay! 🎉'); ui.say = rnd(PIG.goal); if (typeof gainXp === 'function') gainXp(XP.goal); }
   save();
 }
-const dueList = () => L.queue(S.words, today(), S.settings.newPerDay, todayStats().newWords);
+const dueList = () => L.cardQueue(S.words, today(), cardQueueOpts()); // every card due today (cardQueueOpts is in flashcards.js)
 const todayStats = () => S.log[today()] || {};
 const liveWords = () => S.words.filter((w) => !w.deleted);
 const isNight = () => { const h = new Date().getHours(); return h >= 22 || h < 6; };
@@ -175,7 +175,7 @@ function pigLine() {
 }
 
 // ---------- shell ----------
-const NAV = [['home', '🏠', 'Today', '#ff9d8e'], ['cards', '🃏', 'Flashcards', '#7fd4f0'], ['listen', '🎧', 'Listening', '#9ccbff'], ['sheets', '📝', 'Worksheets', '#ffe08a'],
+const NAV = [['home', '🏠', 'Today', '#ff9d8e'], ['cards', '🃏', 'Flashcards', '#7fd4f0'], ['listen', '🎧', 'Listening', '#9ccbff'], ['read', '📚', 'Reading', '#a6e3c4'], ['sheets', '📝', 'Worksheets', '#ffe08a'],
   ['words', '🔤', 'My words', '#ffb38a'], ['dict', '📖', 'Dictionary', '#ffd1a6'], ['kana', 'あ', 'Kana', '#c9a7ff'], ['grammar', '🧠', 'Grammar', '#ffa6c4'], ['progress', '📈', 'Progress', '#b5b9ff'], ['wardrobe', '🎩', 'Wardrobe', '#a8e6cf'], ['settings', '⚙️', 'Settings', '#cfc6ee']];
 function renderSide() {
   const lv = L.levelInfo(S.xp || 0); ui.sideLevel = lv.level;
@@ -221,7 +221,7 @@ VIEWS.home = () => {
   </div>
   <div class="grid g2" style="margin-top:14px">
     ${typeof mixCard === 'function' ? mixCard() : ''}
-    <div class="stack">${levelCard()}${mistakesCard()}</div>
+    <div class="stack">${levelCard()}${mistakesCard()}${trickyCard()}</div>
     <div class="card daily"><h2>今日のことわざ <small class="muted">Proverb of the day</small></h2><div class="dl-row"><div><b class="dl-big jp">${sentHtml(pv[0], pv[2])}</b><small class="muted">${esc(pv[1])}</small></div><button class="ghost mini" data-act="say" data-t="${esc(pv[0])}" title="Listen">🔊</button></div>
       <h3 class="dl-h">今日のフレーズ <small class="muted">Phrases of the day</small></h3>${dailyPick(DAILY_PHRASES, 2).map((x) => `<div class="dl-row"><div><b class="jp">${sentHtml(x[0], x[2])}</b><small class="muted">${esc(x[1])}</small></div><button class="ghost mini" data-act="say" data-t="${esc(x[0])}" title="Listen">🔊</button></div>`).join('')}
       <h3 class="dl-h">今日の単語 <small class="muted">Words of the day</small></h3>${dailyPick(DAILY_WORDS, 2).map((x) => `<div class="dl-row"><div><b class="jp">${jp(x[0], x[2])}</b><small class="muted">${esc(x[1])}</small></div><button class="ghost mini" data-act="say" data-t="${esc(x[0])}" title="Listen">🔊</button></div>`).join('')}</div>
@@ -260,7 +260,10 @@ function prepListen() {
   l.hint = 0; l.diff = null; l.tags = []; l.mean = null; l.showTr = false; l.ex = null;
   warmSpeech(l.mode === 'sentence' ? w.example : w.ja);
   const nx = l.queue[l.i + 1]; if (nx) warmSpeech(l.mode === 'sentence' ? nx.example : nx.ja);
-  if (l.mode === 'meaning') l.opts = L.shuffle([w.en, ...L.pick(liveWords().filter((x) => x.id !== w.id && x.en !== w.en), 3).map((x) => x.en)]);
+  if (l.mode === 'meaning') { // wrong choices of the same kind of word (a verb for a verb), so the sound has to decide
+    const others = liveWords().filter((x) => x.id !== w.id && x.en !== w.en), same = others.filter((x) => (x.pos || 'other') === (w.pos || 'other'));
+    l.opts = L.shuffle([w.en, ...L.pick(same.length >= 3 ? same : others, 3).map((x) => x.en)]);
+  }
   if (l.mode === 'written') { // other words with a similar length make the better wrong answers
     const n = [...w.ja].length, others = liveWords().filter((x) => x.id !== w.id && x.ja !== w.ja).sort((a, b) => Math.abs([...a.ja].length - n) - Math.abs([...b.ja].length - n) || Math.random() - 0.5).slice(0, 8);
     l.opts = L.shuffle([w.ja, ...L.pick(others, 3).map((x) => x.ja)]);
@@ -509,7 +512,7 @@ const ACT = {
   'listen-next': () => { const l = ui.listen; l.i++; if (!l.queue[l.i]) gainXp(XP.session); l.coach = { kind: 'ask', act: '', line: rnd(LISTEN_ASK), played: true }; l.res = null; l.typed = ''; l.picked = ''; prepListen(); render(); if (l.queue[l.i]) setTimeout(listenSay, 150); },
   'word-save': () => {
     const ja = $('#w-ja').value.trim(), en = $('#w-en').value.trim(); if (!ja || !en) return toast('Need both Japanese and English');
-    const o = Object.assign({ ja, en, reading: J.toKana($('#w-rd').value.trim(), { final: true }).replace(/\s/g, ''), example: $('#w-ex').value.trim() }, kindToWord($('#w-kind').value, ja));
+    const o = Object.assign({ ja, en, reading: J.toKana($('#w-rd').value.trim(), { final: true }).replace(/\s/g, ''), example: $('#w-ex').value.trim(), trick: ($('#w-trick') || { value: '' }).value.trim() }, kindToWord($('#w-kind').value, ja));
     if (o.pos === 'verb' && ui.lookupClass && ui.lookupClass.startsWith('v')) o.vclass = ui.lookupClass; ui.lookupClass = '';
     o.exampleEn = o.example && ui.exEn && ui.exEn[0] === o.example ? ui.exEn[1] : ''; o.exTok = o.example && ui.exEn && ui.exEn[0] === o.example ? ui.exEn[2] || '' : ''; ui.exEn = null; ui.exFound = null;
     if (ui.edit) Object.assign(S.words.find((w) => w.id === ui.edit), o); else S.words.push(L.newWord(o));
@@ -569,7 +572,7 @@ document.addEventListener('keydown', (e) => {
   if (ui.view === 'cards' && ui.cards && curCard() && ui.cards.phase !== 'miss') {
     const c = ui.cards, hk = hotkeys(), k = keyOf(e);
     if (!c.flipped && (k === hk.flip || e.key === 'Enter') && cardPrefs().mode === 'flip') { e.preventDefault(); ACT.flip(); }
-    else if (c.flipped && (k === hk.again || k === hk.good || k === hk.easy)) { e.preventDefault(); gradeCard(k === hk.again ? 'again' : k === hk.good ? 'good' : 'easy'); }
+    else if (c.flipped && (k === hk.again || k === hk.good || k === hk.easy)) { e.preventDefault(); const g = k === hk.again ? 'again' : k === hk.good ? 'good' : 'easy'; if (cardGrades().includes(g)) gradeCard(g); }
     else if (c.flipped && e.key === 'Enter') { e.preventDefault(); gradeCard(c.res === 'wrong' ? 'again' : 'good'); }
     else if (k === hk.skip && !c.flipped && document.querySelector('[data-act="skip"]')) { e.preventDefault(); ACT.skip(); }
     else if (k === hk.speak) { const w = curCard().w; speak(w.ja); }
