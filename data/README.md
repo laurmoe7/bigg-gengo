@@ -20,3 +20,7 @@ The frequency list comes from subtitles and is matched by spelling, so it is a r
 ## Bonus Lessons maps and flags
 
 `renderer/mapdata.js` holds simplified SVG outlines. The world and continent maps come from [Natural Earth](https://www.naturalearthdata.com) (public domain), built by BiggTaal's `scripts/build-maps.js`. The Japan map is built by `node scripts/build-japan-map.js <ne_10m_admin_1_states_provinces.geojson>` from Natural Earth's 10m states and provinces (public domain, [GeoJSON copy](https://github.com/nvkelso/natural-earth-vector/tree/master/geojson)); it keeps the other maps and only replaces `japan`. The flags in `renderer/flags` are from [flag-icons](https://github.com/lipis/flag-icons) (MIT, see `renderer/flags/LICENSE.txt`). The Japanese names, readings and facts are in `renderer/geodata.js`.
+
+## Hand-written content
+
+The starter words, proverbs, phrases and patterns are in `scripts/content-src.js`. `node scripts/build-content.js` adds readings and word splits (kuromoji, a build-time dev dependency) and writes `renderer/content.js`.

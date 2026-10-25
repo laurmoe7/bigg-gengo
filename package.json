@@ -1,7 +1,7 @@
 {
   "name": "bigggengo",
   "productName": "BiggGengo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "A cute dark Japanese learning app: flashcards, kana, worksheets, listening",
   "main": "main.js",
