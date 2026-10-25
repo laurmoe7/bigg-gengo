@@ -873,3 +873,9 @@ body[data-furi="hover"] ruby:hover rt { visibility: visible; }
 .sb-result { margin-top: 14px; } .sb-result > b { font-size: 18px; } .sb-real { font-size: 24px; margin: 8px 0 2px; font-weight: 800; }
 .sb-why { margin: 8px 0 0; padding-left: 18px; line-height: 1.7; } .sb-chip { font-weight: 900; padding: 1px 8px; border-radius: 8px; background: color-mix(in srgb, currentColor 14%, transparent); }
 .rl-topic { color: var(--lav); } .rl-subj { color: var(--sky); } .rl-obj { color: var(--pink); } .rl-goal, .rl-place { color: var(--mint); } .rl-with, .rl-from, .rl-also { color: var(--peach); } .rl-mod { color: var(--muted); } .rl-pred { color: var(--butter); }
+
+/* Japan: the neighbours are only context, Okinawa sits in a box, lakes and islands have their own colours */
+.geo-map .mp.ctx { fill: color-mix(in srgb, var(--text) 6%, transparent); stroke-width: .4px; }
+.geo-map .inset { fill: none; stroke: color-mix(in srgb, var(--text) 30%, transparent); stroke-width: 1px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.geo-map .mp.x.land { fill: color-mix(in srgb, var(--text) 16%, transparent); }
+.geo-map .fp.lake { fill: #7fd8e8; } .geo-map .fp.island { fill: #7fd8a8; }

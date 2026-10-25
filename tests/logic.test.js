@@ -440,21 +440,6 @@ test('tricky words: 4+ misses on a card that is still weak', () => {
   assert.deepEqual(L.trickyWords([w({ ja: 'a', lapses: 4, box: 1 }), w({ ja: 'b', lapses: 6, box: 1 }), w({ ja: 'c' })]).map((x) => x.ja), ['b', 'a']);
 });
 
-test('stories: prompt and reading the reply from Claude, with furigana words', () => {
-  const p = L.storyPrompt({ level: 'N4', length: 'short', topic: 'Food & restaurants', words: [{ ja: '予約', reading: 'よやく', en: 'reservation' }] });
-  assert.match(p, /JLPT N4/); assert.match(p, /about 150 characters/); assert.match(p, /予約（よやく） \(reservation\)/);
-  const story = { story: { title: '月曜日', paragraphs: [
-    { ja: '医者に行きました。', en: 'I went to the doctor.', words: [['医者', 'いしゃ', '医者'], ['に', '', ''], ['行きました', 'いきました', '行く'], ['。', '', '']] },
-    { ja: '疲れました。', en: 'I was tired.', words: [['疲れ', 'つかれ', '']] }, // does not join up: no words kept
-  ], glossary: [{ ja: '医者', reading: 'いしゃ', en: 'doctor' }], questions: [{ q: 'どこ？', options: ['医者', '店'], answer: '医者' }] } };
-  const r = L.parseStory('```json\n' + JSON.stringify(story) + '\n```').story;
-  assert.equal(r.paragraphs[0].tok, '医者;いしゃ;医者|に;;|行きました;いきました;行く|。;;');
-  assert.deepEqual(J.tokens(['', '', r.paragraphs[0].tok]).map((x) => x.b), ['医者', 'に', '行く', '。']);
-  assert.equal(r.paragraphs[1].tok, '');
-  assert.equal(r.glossary[0].reading, 'いしゃ'); assert.equal(r.questions.length, 1);
-  assert.ok(L.parseStory('nothing').error);
-});
-
 test('spelling marks: the slips in a near miss, in kana even when typed in romaji', () => {
   const r = L.spellMarks('gakou', ['学校', 'がっこう']);
   assert.equal(r.answer, 'がっこう');

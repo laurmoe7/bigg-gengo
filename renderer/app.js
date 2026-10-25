@@ -182,8 +182,8 @@ function pigLine() {
 }
 
 // ---------- shell ----------
-const NAV = [['home', '🏠', 'Today', '#ff9d8e'], ['cards', '🃏', 'Flashcards', '#7fd4f0'], ['listen', '🎧', 'Listening', '#9ccbff'], ['read', '📚', 'Reading', '#a6e3c4'], ['sheets', '📝', 'Worksheets', '#ffe08a'],
-  ['words', '🔤', 'My words', '#ffb38a'], ['dict', '📖', 'Dictionary', '#ffd1a6'], ['kana', 'あ', 'Kana', '#c9a7ff'], ['grammar', '🧠', 'Grammar', '#ffa6c4'], ['progress', '📈', 'Progress', '#b5b9ff'], ['wardrobe', '🎩', 'Wardrobe', '#a8e6cf'], ['settings', '⚙️', 'Settings', '#cfc6ee']];
+const NAV = [['home', '🏠', 'Today', '#ff9d8e'], ['cards', '🃏', 'Flashcards', '#7fd4f0'], ['listen', '🎧', 'Listening', '#9ccbff'], ['sheets', '📝', 'Worksheets', '#ffe08a'],
+  ['words', '🔤', 'My words', '#ffb38a'], ['dict', '📖', 'Dictionary', '#ffd1a6'], ['kana', 'あ', 'Kana', '#c9a7ff'], ['grammar', '🧠', 'Grammar', '#ffa6c4'], ['bonus', '🎁', 'Bonus Lessons', '#c9a7ff'], ['progress', '📈', 'Progress', '#b5b9ff'], ['wardrobe', '🎩', 'Wardrobe', '#a8e6cf'], ['settings', '⚙️', 'Settings', '#cfc6ee']];
 function renderSide() {
   const lv = L.levelInfo(S.xp || 0); ui.sideLevel = lv.level;
   const due = dueList().length, fresh = ((S.wardrobe || {}).fresh || []).length, sig = [ui.view, due, lv.level, liveWords().length, pigStage(), currentLook(), currentBg(), fresh, today()].join('|');
@@ -202,6 +202,7 @@ function render() {
   ui.rendered = ui.view;
   main.innerHTML = v();
   main.scrollTop = keep;
+  if (typeof geoFit === 'function') geoFit(); // the Bonus quiz page is sized to the window
   const f = $('[data-focus]'); if (f) f.focus();
 }
 ui.wsScroll = {}; // where you were in each open worksheet, so coming back to it puts you at the same spot
@@ -557,11 +558,11 @@ document.addEventListener('keydown', (e) => {
     if (other) { keys[other] = keys[act]; toast(keyLabel(k) + ' was used for "' + HOTKEY_DEFS.find((d) => d[0] === other)[1] + '", so the two keys swapped.'); }
     keys[act] = k; ui.hkCapture = ''; save(); return render();
   }
-  if ((ui.view === 'cards' && ['typed', 'copy', 'ph-in', 'ph-copy'].includes(e.target.id))) { // while the typing box has focus: the skip key (or Esc) = I don't know, the hint key = hint
+  if ((ui.view === 'cards' && ['typed', 'copy', 'ph-in', 'ph-copy'].includes(e.target.id)) || (ui.view === 'bonus' && e.target.id === 'geo-in')) { // while the typing box has focus: the skip key (or Esc) = I don't know, the hint key = hint
     const hk = hotkeys(), k = keyOf(e), plain = !e.ctrlKey && !e.altKey && !e.metaKey;
     const hit = (key) => (/^\p{L}$/u.test(key) ? e.ctrlKey && !e.altKey && k === key : plain && k === key); // a letter needs Ctrl, or it would be typed
-    if (e.key === 'Escape' || hit(hk.skip)) { e.preventDefault(); ACT[{ typed: 'skip', copy: 'copy-skip', 'ph-in': 'ph-skip', 'ph-copy': 'ph-copy-skip' }[e.target.id]](); return; }
-    if (hit(hk.hint)) { const b = document.querySelector('[data-act="fc-hint"],[data-act="ph-hint"]'); if (b) { e.preventDefault(); b.click(); } return; }
+    if (e.key === 'Escape' || hit(hk.skip)) { e.preventDefault(); ACT[{ typed: 'skip', copy: 'copy-skip', 'ph-in': 'ph-skip', 'ph-copy': 'ph-copy-skip', 'geo-in': 'geo-skip' }[e.target.id]](); return; }
+    if (hit(hk.hint)) { const b = document.querySelector('[data-act="fc-hint"],[data-act="ph-hint"],[data-act="geo-hint"]'); if (b) { e.preventDefault(); b.click(); } return; }
   }
   if (e.key === ' ' && e.target.id === 'typed' && ui.view === 'cards' && ui.cards && spaceChecks(curCard()) && e.target.value.trim()) { e.preventDefault(); checkTyped(); return; } // a one-word answer: Space checks
   if (e.key === ' ' && e.target.id === 'ph-in' && typeof phSpace === 'function' && phSpace() && e.target.value.trim()) { e.preventDefault(); ACT['ph-check'](); return; } // a one-word fill the blank answer: Space checks
