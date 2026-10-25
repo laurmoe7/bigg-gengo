@@ -8,13 +8,20 @@ const rnd = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const fill = (s, o) => s.replace(/\{(\w+)\}/g, (_, k) => (o && o[k] != null ? o[k] : ''));
 // Japanese text with furigana: jp(word, reading) for one word, wordHtml(w) for a saved word, sentHtml(sentence, words, hit) for a sentence
 // (words: its "surface;reading;basic|..." split; hit: { start, end } to underline)
-const jp = (ja, rd) => J.rubyHtml(ja, rd, esc);
+// Settings → "Show Japanese as" picks the script (see J.SCRIPTS); jpTok is one word inside a sentence, jpJoin puts a sentence's words together
+let jpNoRomaji = false;
+const script = () => { const m = (S && S.settings && S.settings.script) || 'kanji'; return jpNoRomaji && /romaji/i.test(m) ? 'kana' : m; };
+// a question you answer in English: romaji would give it away, so it is shown in kana (romaji comes back on the answer side)
+const noRomaji = (f) => { jpNoRomaji = true; try { return f(); } finally { jpNoRomaji = false; } };
+const jp = (ja, rd) => J.scriptHtml(ja, rd, script(), esc);
+const jpTok = (s, rd) => J.scriptHtml(s, rd, script(), esc, { particle: true });
+const jpJoin = (parts) => J.scriptJoin(parts, script());
 const wordHtml = (w) => jp(w.ja, w.reading);
 function sentHtml(ja, tok, hit) {
   const toks = tok ? J.tokens([ja, '', tok]) : null;
   if (toks && toks.map((t) => t.s).join('') === ja) {
     let pos = 0;
-    return toks.map((t) => { const a = pos, b = (pos += t.s.length), h = J.rubyHtml(t.s, t.r, esc); return hit && a < hit.end && b > hit.start ? '<u>' + h + '</u>' : h; }).join('');
+    return jpJoin(toks.map((t) => { const a = pos, b = (pos += t.s.length), h = jpTok(t.s, t.r); return [hit && a < hit.end && b > hit.start ? '<u>' + h + '</u>' : h, t.s]; }));
   }
   return hit ? esc(ja.slice(0, hit.start)) + '<u>' + esc(ja.slice(hit.start, hit.end)) + '</u>' + esc(ja.slice(hit.end)) : esc(ja);
 }
@@ -206,22 +213,14 @@ const VIEWS = {};
 const dayNo = () => L.daysBetween('2000-01-01', today()); // counts local days, so the daily things change at your midnight, not at UTC's
 const dailyPick = (list, n) => { const d = dayNo(); return Array.from({ length: n }, (_, i) => list[(d * n + i) % list.length]); }; // the same few every time today, different tomorrow
 VIEWS.home = () => {
-  const t = todayStats(), g = S.settings.dailyGoal, due = dueList().length, m = L.mastery(S.words), lv = L.levelInfo(S.xp || 0);
   if (!ui.say) ui.say = pigLine();
-  const week = L.week(S.log, today()), max = Math.max(5, ...week.map((x) => x.n));
   const pv = PROVERBS[dayNo() % PROVERBS.length];
   const dn = (d) => J.DAYS[new Date(d + 'T12:00').getDay()];
   const upd = UPD.status === 'ready' ? `<div class="card upd"><div class="row"><div class="grow"><b>A new BiggGengo is ready! 🌸</b><div class="muted">Version ${esc(UPD.version)} has been downloaded. It installs when you restart, and your words and progress are safe.</div></div><button class="primary" data-act="update-install">Restart to update</button></div></div>` : '';
   return `${upd}${typeof recapNotice === 'function' ? recapNotice() : ''}<div class="hero">${pigSvg(pigMood(), '', { stage: pigStage(), note: true, cap: isNight() })}<div class="bubble" id="bubble">${esc(ui.say)}</div></div>
-  <div class="grid g4">
-    <div class="card stat s-coral"><i class="si">🎯</i><b>${(t.reviews || 0)} / ${g}</b><span>cards today</span><div class="bar" style="margin-top:8px"><i style="width:${Math.min(100, ((t.reviews || 0) / g) * 100)}%"></i></div></div>
-    <div class="card stat s-sun"><i class="si">⭐</i><b>Lv ${lv.level}</b><span>${esc(lv.title[0])}</span></div>
-    <div class="card stat s-aqua"><i class="si">🃏</i><b>${due}</b><span>cards due now</span></div>
-    <div class="card stat s-mint"><i class="si">🌱</i><b>${m.learned} <small class="muted">/ ${m.total}</small></b><span title="Words you have remembered over a few weeks">words learned</span></div>
-  </div>
-  <div class="grid g2" style="margin-top:14px">
-    ${typeof mixCard === 'function' ? mixCard() : ''}
-    <div class="stack">${levelCard()}${mistakesCard()}${trickyCard()}</div>
+  <div class="grid g2 home">
+    <div class="stack">${typeof mixCard === 'function' ? mixCard() : ''}${trickyCard()}</div>
+    <div class="stack">${levelCard()}${mistakesCard()}</div>
     <div class="card daily"><h2>今日のことわざ <small class="muted">Proverb of the day</small></h2><div class="dl-row"><div><b class="dl-big jp">${sentHtml(pv[0], pv[2])}</b><small class="muted">${esc(pv[1])}</small></div><button class="ghost mini" data-act="say" data-t="${esc(pv[0])}" title="Listen">🔊</button></div>
       <h3 class="dl-h">今日のフレーズ <small class="muted">Phrases of the day</small></h3>${dailyPick(DAILY_PHRASES, 2).map((x) => `<div class="dl-row"><div><b class="jp">${sentHtml(x[0], x[2])}</b><small class="muted">${esc(x[1])}</small></div><button class="ghost mini" data-act="say" data-t="${esc(x[0])}" title="Listen">🔊</button></div>`).join('')}
       <h3 class="dl-h">今日の単語 <small class="muted">Words of the day</small></h3>${dailyPick(DAILY_WORDS, 2).map((x) => `<div class="dl-row"><div><b class="jp">${jp(x[0], x[2])}</b><small class="muted">${esc(x[1])}</small></div><button class="ghost mini" data-act="say" data-t="${esc(x[0])}" title="Listen">🔊</button></div>`).join('')}</div>
@@ -415,6 +414,7 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 's-gloss') { S.settings.gloss = e.target.checked; save(); render(); }
   if (e.target.id === 's-romaji') { S.settings.romaji = e.target.checked; save(); }
   if (e.target.id === 's-kanaok') { S.settings.kanaOk = e.target.checked; save(); }
+  if (e.target.id === 's-script') { S.settings.script = e.target.value; save(); render(); return; }
   if (e.target.id === 's-furi') { S.settings.furigana = e.target.value; save(); applyFuri(); }
 });
 // while the volume slider moves, whatever is playing follows it
@@ -448,7 +448,8 @@ VIEWS.settings = () => {
       <label class="row" style="margin-top:12px"><input type="checkbox" id="s-gloss" ${S.settings.gloss !== false ? 'checked' : ''}> Explain grammar terms when I hover over them</label>
       <label class="row" style="margin-top:6px"><input type="checkbox" id="s-romaji" ${S.settings.romaji !== false ? 'checked' : ''}> Turn romaji into kana as I type (ka → か)</label>
       <label class="row" style="margin-top:6px"><input type="checkbox" id="s-kanaok" ${S.settings.kanaOk !== false ? 'checked' : ''}> Accept the kana reading when the card has kanji</label>
-      <label class="f" style="margin-top:10px">Furigana (the small kana above kanji)</label><select id="s-furi"><option value="always" ${(S.settings.furigana || 'always') === 'always' ? 'selected' : ''}>Always show</option><option value="hover" ${S.settings.furigana === 'hover' ? 'selected' : ''}>Show when I hover</option><option value="off" ${S.settings.furigana === 'off' ? 'selected' : ''}>Hide</option></select></div>
+      <label class="f" style="margin-top:10px">Show Japanese as</label><select id="s-script">${J.SCRIPTS.map(([v, n]) => `<option value="${v}" ${script() === v ? 'selected' : ''}>${n}</option>`).join('')}</select>
+      <label class="f" style="margin-top:10px">${script() === 'kanaRomaji' ? 'Romaji above the kana' : 'Furigana (the small kana above kanji)'}</label><select id="s-furi"><option value="always" ${(S.settings.furigana || 'always') === 'always' ? 'selected' : ''}>Always show</option><option value="hover" ${S.settings.furigana === 'hover' ? 'selected' : ''}>Show when I hover</option><option value="off" ${S.settings.furigana === 'off' ? 'selected' : ''}>Hide</option></select></div>
     <div class="card"><h2>Sound</h2>
       <label class="row" style="margin-bottom:10px"><input type="checkbox" id="s-sound" ${s.sound ? 'checked' : ''}> Play chimes</label>
       <label class="f">Volume <span class="muted" id="s-vol-n">${Math.round(vol() * 100)}%</span></label><input type="range" id="s-vol" min="0" max="1" step="0.05" value="${vol()}" style="margin-bottom:12px">

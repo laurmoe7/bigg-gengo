@@ -93,6 +93,13 @@ function trickHtml(w) {
     <div class="row" style="margin-top:6px"><input type="text" class="grow" id="fc-trick" autocomplete="off" placeholder="e.g. 木 (ki) looks like a tree" data-enter="trick-save" data-id="${w.id}"><button class="ghost" data-act="trick-save" data-id="${w.id}">Save</button></div></div>`;
 }
 // ---------- checking what you typed ----------
+// the "Close!" note under the answer: your letters with the slips marked, and the sound mix-up by name when it is a known one
+function spellNote(typed, answers, fallback) {
+  const r = L.spellMarks(typed, answers);
+  if (!r) return `<div class="warn">${fallback || 'Close! Check the spelling.'}</div>`;
+  const tags = r.tags.map((id) => L.SOUNDS[id].name).join(', ');
+  return `<div class="warn">Close! Look at the marked ${J.hasJa(r.answer) ? 'kana' : 'letters'}${tags ? ' (' + esc(tags) + ')' : ''}:<div class="spell jp">${r.marks.map(([c, k]) => `<span class="sp-${k}">${esc(c)}</span>`).join('')}</div></div>`;
+}
 // Old "type answer" mode (you grade yourself afterwards): right | close | wrong
 const bestCheck = (typed, w, dir) => {
   if (dir === 'ja-en') return L.check(typed, w.en);
@@ -154,12 +161,12 @@ VIEWS.cards = () => {
   const czBack = cz ? sentHtml(w.example, w.exTok, { start: cz.before.length, end: cz.before.length + cz.form.length }) : '';
   const frontHtml = cz ? `<div class="ph-big">${czGap}</div><div class="muted">the word means: <b>${esc(w.en)}</b></div><div class="fc-hint" id="fc-hint">${c.hint ? esc(L.hintText(cz.reading || cz.form, c.hint)) : ''}</div>`
     : jaFront
-    ? `${posPill(w) ? `<div class="muted" style="margin-bottom:4px">${posPill(w)}</div>` : ''}<div class="fc-big jp">${wordHtml(w)}</div>${speakBtn(wordLabel(w))}`
+    ? `${posPill(w) ? `<div class="muted" style="margin-bottom:4px">${posPill(w)}</div>` : ''}<div class="fc-big jp">${noRomaji(() => wordHtml(w))}</div>${speakBtn(wordLabel(w))}`
     : `<div class="fc-big">${esc(w.en)}</div><div class="muted">${posPill(w) ? posPill(w) + ' ' : ''}in Japanese</div>`;
-  const ans = jaFront ? esc(w.en) : `<span class="jp">${wordHtml(w)}</span>`;
+  const ans = jaFront ? esc(w.en) + (/romaji/i.test(script()) ? `<div class="fc-ex jp">${wordHtml(w)}</div>` : '') : `<span class="jp">${wordHtml(w)}</span>`;
   const czBase = cz && c.res === 'close' && [w.ja, w.reading].filter(Boolean).some((x) => J.norm(x) === J.norm(c.typed)) && ![cz.form, cz.reading].some((x) => x && J.norm(x) === J.norm(c.typed));
-  const backHtml = cz ? `<div class="ph-big jp ${c.res ? 'ans ' + c.res : ''}">${czBack}</div>${speakBtn(w.example)}<div class="fc-ex"><span class="jp">${wordHtml(w)}</span> = ${esc(w.en)}</div>${czBase ? `<div class="warn">Right word, but this sentence needs <b>${esc(cz.form)}</b>.</div>` : c.res === 'close' ? '<div class="warn">Close! Check the spelling.</div>' : c.res === 'wrong' ? (c.typed || !exEnOf(w) ? `<div class="warn">${c.typed ? 'You typed: ' + esc(c.typed) : 'That is okay, here it is!'}</div>` : '') : ''}${exEnOf(w) ? `<div class="${c.res === 'wrong' && !c.typed ? 'warn' : 'cz-en'}">${esc(exEnOf(w))}</div>` : ''}`
-    : `<div class="fc-big ${c.res ? 'ans ' + c.res : ''}">${ans}</div>${!jaFront ? speakBtn(wordLabel(w)) : ''}${w.example ? `<div class="fc-ex"><span class="jp">${sentHtml(w.example, w.exTok, L.findInExample(w.example, w, w.exTok))}</span>${exEnOf(w) ? '<br>' + esc(exEnOf(w)) : ''}</div>` : ''}${c.res === 'close' ? '<div class="warn">Close! Check the spelling.</div>' : c.res === 'wrong' ? `<div class="warn">You typed: ${esc(c.typed)}</div>` : ''}`;
+  const backHtml = cz ? `<div class="ph-big jp ${c.res ? 'ans ' + c.res : ''}">${czBack}</div>${speakBtn(w.example)}<div class="fc-ex"><span class="jp">${wordHtml(w)}</span> = ${esc(w.en)}</div>${czBase ? `<div class="warn">Right word, but this sentence needs <b>${esc(cz.form)}</b>.</div>` : c.res === 'close' ? spellNote(c.typed, [cz.form, cz.reading]) : c.res === 'wrong' ? (c.typed || !exEnOf(w) ? `<div class="warn">${c.typed ? 'You typed: ' + esc(c.typed) : 'That is okay, here it is!'}</div>` : '') : ''}${exEnOf(w) ? `<div class="${c.res === 'wrong' && !c.typed ? 'warn' : 'cz-en'}">${esc(exEnOf(w))}</div>` : ''}`
+    : `<div class="fc-big ${c.res ? 'ans ' + c.res : ''}">${ans}</div>${!jaFront ? speakBtn(wordLabel(w)) : ''}${w.example ? `<div class="fc-ex"><span class="jp">${sentHtml(w.example, w.exTok, L.findInExample(w.example, w, w.exTok))}</span>${exEnOf(w) ? '<br>' + esc(exEnOf(w)) : ''}</div>` : ''}${c.res === 'close' ? spellNote(c.typed, jaFront ? String(w.en).split(/[;,/]/) : [w.ja, w.reading], 'Right reading! This card wants it in kanji: ' + esc(w.ja)) : c.res === 'wrong' ? `<div class="warn">You typed: ${esc(c.typed)}</div>` : ''}`;
   const sug = c.res === 'wrong' ? 'again' : 'good';
   const iv = L.previewIntervals(L.cardRec(w, q.dir), today());
   const hk = hotkeys(), gs = cardGrades(), gBtn = (g, label, small) => (gs.includes(g) ? `<button class="g-${g} ${sug === g ? 'on' : ''}" data-act="grade" data-g="${g}"><span class="gl"><kbd class="kbd" title="Press this key">${keyLabel(hk[g])}</kbd>${label}</span><small>${small}</small></button>` : '');

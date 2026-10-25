@@ -67,7 +67,7 @@ VIEWS.words = () => {
 };
 
 // real example sentences for the word in the form (Tatoeba)
-const exList = () => (ui.exFound ? (ui.exFound.length ? '<div class="muted" style="margin:10px 0 4px">Tap one to use it:</div>' + ui.exFound.map((p, i) => `<button class="exs" data-act="ex-use" data-i="${i}"><b class="jp">${J.sentenceRuby(p, esc)}</b><span class="muted">${esc(p[1])}</span></button>`).join('') : '<div class="muted" style="margin-top:10px">No sentences found for that word.</div>') : '');
+const exList = () => (ui.exFound ? (ui.exFound.length ? '<div class="muted" style="margin:10px 0 4px">Tap one to use it:</div>' + ui.exFound.map((p, i) => `<button class="exs" data-act="ex-use" data-i="${i}"><b class="jp">${sentHtml(p[0], p[2])}</b><span class="muted">${esc(p[1])}</span></button>`).join('') : '<div class="muted" style="margin-top:10px">No sentences found for that word.</div>') : '');
 
 // The Dictionary page: look up any word, or browse the common words you do not have yet
 VIEWS.dict = () => {

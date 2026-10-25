@@ -10,7 +10,7 @@
   L.uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
   // ---------- state ----------
-  L.defaultSettings = () => ({ dailyGoal: 10, newPerDay: 10, autoUpdate: true, rate: 0.9, volume: 1, voice: '', login: false, sound: true, theme: 'slate', looks: true, romaji: true, kanaOk: true, furigana: 'always', jlpt: 'N5' });
+  L.defaultSettings = () => ({ dailyGoal: 10, newPerDay: 10, autoUpdate: true, rate: 0.9, volume: 1, voice: '', login: false, sound: true, theme: 'slate', looks: true, romaji: true, kanaOk: true, furigana: 'always', script: 'kanji', jlpt: 'N5' });
   L.emptyState = () => ({ v: 1, words: [], lessons: [], log: {}, settings: L.defaultSettings(), seeded: false });
   L.fixState = (s) => {
     const e = L.emptyState();
@@ -253,6 +253,98 @@
     }
     return { cells, extra };
   };
+  // How a near miss was spelled: your letters with the wrong ones marked, and the ones you left out shown in place. answers: what would count
+  // (kanji, kana or English); the closest one is used. Japanese is compared as hiragana, and romaji typing is shown as the kana it makes.
+  // Returns { marks: [[letter, 'ok' | 'bad' | 'miss']], answer, tags: sound slips (L.SOUNDS ids) } or null when nothing is misspelled.
+  L.spellMarks = (typed, answers) => {
+    const list = (answers || []).map((x) => String(x || '').replace(/\(.*?\)/g, '').trim()).filter(Boolean), raw = String(typed || '').trim();
+    if (!raw || !list.length) return null;
+    const ja = list.some((x) => J.hasJa(x)), ty = ja && !J.hasJa(raw) ? J.toKana(raw.toLowerCase(), { final: true }) : raw;
+    const key = ja ? (c) => J.toHira(c.normalize('NFKC')) : (c) => c.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const skip = /[\s　。、！？!?.,「」]/;
+    const T = Array.from(ty).filter((c) => !skip.test(c)), t = T.map(key);
+    const dist = (x) => L.lev(t.join(''), Array.from(x).filter((c) => !skip.test(c)).map(key).join(''));
+    const best = list.reduce((x, y) => (dist(y) < dist(x) ? y : x)), A = Array.from(best).filter((c) => !skip.test(c)), a = A.map(key), n = t.length, m = a.length;
+    const dp = Array.from({ length: n + 1 }, (_, i) => { const r = new Array(m + 1).fill(0); r[0] = i; return r; });
+    for (let j = 0; j <= m; j++) dp[0][j] = j;
+    for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (t[i - 1] === a[j - 1] ? 0 : 1));
+    if (!dp[n][m]) return null;
+    const out = []; let i = n, j = m;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && t[i - 1] === a[j - 1] && dp[i][j] === dp[i - 1][j - 1]) { out.push([T[i - 1], 'ok']); i--; j--; }
+      else if (i > 0 && j > 0 && dp[i][j] === dp[i - 1][j - 1] + 1) { out.push([T[i - 1], 'bad']); i--; j--; }
+      else if (i > 0 && dp[i][j] === dp[i - 1][j] + 1) { out.push([T[i - 1], 'bad']); i--; }
+      else { out.push([A[j - 1], 'miss']); j--; }
+    }
+    return { marks: out.reverse(), answer: best, tags: ja ? L.soundTags(best, ty) : [] };
+  };
+  // ---------- sentence builder (Grammar page) ----------
+  // A real sentence cut into phrase tiles: each content word keeps the particles, endings and helper verbs that follow it,
+  // so 私|は|学校|に|行き|ます becomes 私は / 学校に / 行きます. toks: from J.tokens. The last ! ? or 。 is kept apart as `end`.
+  const JB_PART = new Set('は が を に で へ と も の から まで より や か ね よ な わ ぞ ぜ さ って けど けれど し ば たら たり なら ほど だけ しか など くらい ぐらい ごろ かも かな かしら かい じゃん ので のに ながら よね'.split(' '));
+  const JB_AUX = new Set('ます まし ませ ましょ ん です でし だ だっ た て てる てた ちゃ じゃ ない なかっ なく なけれ たい たく たかっ い いる いた いま う よう れる られる られ れ せる させる せ させ そう らしい みたい でしょ だろ ござい とく ちゃう ちゃっ じゃっ 過ぎ すぎ 過ぎる すぎる'.split(' '));
+  const JB_SUFFIX = new Set('さん ちゃん くん 君 様 たち 達 的 屋 語 人'.split(' '));
+  const JB_COUNTER = new Set('時 分 年 月 日 回 歳 個 枚 本 円 つ 匹 冊 台 階 杯 週間 時間 人'.split(' '));
+  const JB_PREFIX = new Set('お ご 不 未 無 非 この その あの どの こんな そんな あんな どんな'.split(' ')); // these stick to the word after them
+  const JB_CASE = new Set('は が を に へ で と から まで も より'.split(' '));
+  L.chunkSentence = (toks) => {
+    toks = (toks || []).slice(); let end = '';
+    while (toks.length && /^[。！？!?.…]+$/.test(toks[toks.length - 1].s)) end = toks.pop().s + end;
+    const chunks = []; let glue = false;
+    toks.forEach((t, i) => {
+      const prev = toks[i - 1], cur = chunks[chunks.length - 1];
+      const afterCase = prev && JB_CASE.has(prev.s) && !(cur && cur.toks.length === 1); // が|ない: ない starts its own tile after a particle
+      const attach = cur && !glue && (/^[、，,]$/.test(t.s) || JB_PART.has(t.s) || (JB_AUX.has(t.s) && !afterCase) || t.b === 'する' && prev && !JB_CASE.has(prev.s) && J.hasKanji(prev.s)
+        || JB_SUFFIX.has(t.s) || (JB_COUNTER.has(t.s) && /[0-9０-９一二三四五六七八九十百千万何]$/.test(prev ? prev.s : '')));
+      if (attach || glue) { cur.toks.push(t); cur.s += t.s; } else chunks.push({ s: t.s, toks: [t] });
+      glue = JB_PREFIX.has(t.s) && i < toks.length - 1;
+    });
+    chunks.forEach((c) => { c.s = c.s.replace(/[、，,]$/, ''); });
+    return { chunks, end };
+  };
+  // The job of a tile, from the particle at its end. The last tile is the predicate (the verb, adjective or です that ends the sentence).
+  L.JB_ROLES = { topic: 'topic (は)', subj: 'subject (が)', obj: 'object (を)', goal: 'where to / when (に, へ)', place: 'where / how (で)', with: 'with / and (と)', from: 'from / until (から, まで)', also: 'also (も)', mod: 'describes the next word (の, な)', pred: 'verb / end of the sentence' };
+  L.jbRole = (chunk, last) => {
+    if (last) return 'pred';
+    const p = (chunk.toks.filter((t) => !/^[、，,]$/.test(t.s)).pop() || {}).s;
+    return { は: 'topic', が: 'subj', を: 'obj', に: 'goal', へ: 'goal', で: 'place', と: 'with', から: 'from', まで: 'from', も: 'also', の: 'mod', な: 'mod' }[p] || '';
+  };
+  // Kinds of sentence, for the chips: ids from L.JB_PATS
+  L.JB_PATS = [['all', 'Mixed'], ['wa-ga', 'は and が'], ['wo', 'Objects (を)'], ['place', 'Where and when (に へ で)'], ['question', 'Questions'], ['past', 'Past'], ['neg', 'Negative'], ['te', 'て-form']];
+  L.jbPatterns = (toks, chunks, end) => {
+    const roles = chunks.map((c, i) => L.jbRole(c, i === chunks.length - 1)), s = toks.map((t) => t.s), out = [];
+    if (roles.includes('topic') || roles.includes('subj')) out.push('wa-ga');
+    if (roles.includes('obj')) out.push('wo');
+    if (roles.includes('goal') || roles.includes('place')) out.push('place');
+    if (/[？?]/.test(end) || s[s.length - 1] === 'か') out.push('question');
+    if (toks.some((t) => t.b === 'た' || t.b === 'だ' && t.s === 'だっ') || s.includes('まし') && s.includes('た') || /かっ$/.test(s.join('|'))) out.push('past');
+    if (s.some((x, i) => (x === 'ない' || x === 'なかっ' || x === 'なく' || x === 'ん' && s[i - 1] === 'ませ') && !JB_CASE.has(s[i - 1]))) out.push('neg');
+    if (s.some((x, i) => (x === 'て' || x === 'てる' || x === 'てた') && i > 0)) out.push('te');
+    return out;
+  };
+  // Grades a built order against the real sentence (tile strings). 'right' when it is the same, or when only whole particle phrases moved
+  // and the predicate is still last (Japanese lets those move: the particles show each word's job); 'close' when the predicate is last but
+  // other tiles are mixed up; otherwise 'wrong'. bad: the positions that differ from the real sentence.
+  L.jbGrade = (target, answer, roles) => {
+    const n = target.length, bad = target.map((w, i) => (answer[i] === w ? -1 : i)).filter((i) => i >= 0);
+    if (answer.length !== n) return { res: 'wrong', bad };
+    if (!bad.length) return { res: 'right', bad };
+    if (answer[n - 1] !== target[n - 1]) return { res: 'wrong', bad };
+    // phrases: a particle tile together with the tiles before it that describe it (私の / 友達と). Words without a particle stay with the next phrase.
+    const FREE = ['topic', 'subj', 'obj', 'goal', 'place', 'with', 'from', 'also'], units = []; let u = [];
+    for (let i = 0; i < n - 1; i++) { u.push(target[i]); if (FREE.includes((roles || [])[i])) { units.push(u); u = []; } }
+    if (u.length) return { res: 'close', bad }; // a word right before the verb (an adverb or object without a particle) has to stay there
+    const used = units.map(() => false); let at = 0;
+    while (at < n - 1) {
+      const k = units.findIndex((x, j) => !used[j] && x.every((w, d) => answer[at + d] === w));
+      if (k < 0) return { res: 'close', bad };
+      used[k] = true; at += units[k].length;
+    }
+    return { res: 'right', bad: [], alt: true };
+  };
+  // How many tiles from the start are in the right place (a hint keeps these and adds the next one)
+  L.jbPrefix = (target, answer) => { let k = 0; while (k < answer.length && k < target.length && answer[k] === target[k]) k++; return k; };
+
   // Hint text for dictation: level 1 = one blank per character, level 2 = the first character too.
   L.hintText = (target, level) => { const cs = Array.from(String(target).replace(/[。、！？!?.,，\s「」]+/g, '')); return cs.map((c, i) => (i === 0 && level >= 2 ? c : '○')).join(' '); };
   // Words to practise a sound with (looked up by their reading).

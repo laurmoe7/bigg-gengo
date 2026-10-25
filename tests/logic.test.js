@@ -454,3 +454,30 @@ test('stories: prompt and reading the reply from Claude, with furigana words', (
   assert.equal(r.glossary[0].reading, 'いしゃ'); assert.equal(r.questions.length, 1);
   assert.ok(L.parseStory('nothing').error);
 });
+
+test('spelling marks: the slips in a near miss, in kana even when typed in romaji', () => {
+  const r = L.spellMarks('gakou', ['学校', 'がっこう']);
+  assert.equal(r.answer, 'がっこう');
+  assert.deepEqual(r.marks, [['が', 'ok'], ['っ', 'miss'], ['こ', 'ok'], ['う', 'ok']]);
+  assert.deepEqual(r.tags, ['small-tsu']);
+  assert.deepEqual(L.spellMarks('hause', ['house']).marks.map((m) => m[1]), ['ok', 'bad', 'ok', 'ok', 'ok']);
+  assert.equal(L.spellMarks('たべる', ['食べる', 'たべる']), null); // nothing misspelled
+  assert.equal(L.spellMarks('', ['x']), null);
+});
+
+test('sentence builder: phrase tiles, and other orders of particle phrases count when the verb stays last', () => {
+  const toks = J.tokens(['私は毎日学校に行きます。', '', '私;わたし|は|毎日;まいにち|学校;がっこう|に|行き;いき;行く|ます|。']);
+  const { chunks, end } = L.chunkSentence(toks), w = chunks.map((c) => c.s), roles = chunks.map((c, i) => L.jbRole(c, i === chunks.length - 1));
+  assert.deepEqual(w, ['私は', '毎日', '学校に', '行きます']); assert.equal(end, '。');
+  assert.deepEqual(roles, ['topic', '', 'goal', 'pred']);
+  assert.deepEqual(L.jbPatterns(toks, chunks, end), ['wa-ga', 'place']);
+  assert.equal(L.jbGrade(w, w.slice(), roles).res, 'right');
+  const alt = L.jbGrade(w, ['毎日', '学校に', '私は', '行きます'], roles); assert.equal(alt.res, 'right'); assert.equal(alt.alt, true);
+  assert.equal(L.jbGrade(w, ['私は', '学校に', '毎日', '行きます'], roles).res, 'close'); // 毎日 moved away from its phrase
+  const bad = L.jbGrade(w, ['私は', '行きます', '学校に', '毎日'], roles); assert.equal(bad.res, 'wrong'); assert.deepEqual(bad.bad, [1, 3]);
+  assert.equal(L.jbPrefix(w, ['私は', '毎日', '行きます']), 2);
+  const t2 = J.tokens(['時間がない。', '', '時間;じかん|が|ない|。']);
+  assert.deepEqual(L.chunkSentence(t2).chunks.map((c) => c.s), ['時間が', 'ない']); // ない after a particle is its own tile
+  const t3 = J.tokens(['この本を読んだ。', '', 'この|本;ほん|を|読ん;よん;読む|だ|。']);
+  assert.deepEqual(L.chunkSentence(t3).chunks.map((c) => c.s), ['この本を', '読んだ']);
+});

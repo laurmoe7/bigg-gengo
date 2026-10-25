@@ -70,6 +70,7 @@
     while (i < s.length) {
       const two = s.slice(i, i + 2), one = s[i];
       if (one === 'っ') { dbl = true; i++; continue; }
+      if (one === 'ー') { const v = out.match(/[aiueo]$/); out += v ? v[0] : ''; i++; continue; } // コーヒー -> koohii
       let r = null, n = 0;
       if (H2R[two] != null && /[ゃゅょぁぃぅぇぉ]/.test(two[1])) { r = H2R[two]; n = 2; } else if (H2R[one] != null) { r = H2R[one]; n = 1; }
       if (r == null) { out += one; i++; dbl = false; continue; }
@@ -123,6 +124,32 @@
   J.rubyHtml = (word, reading, esc) => {
     esc = esc || ((x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
     return J.ruby(word, reading).map(([t, r]) => (r ? '<ruby>' + esc(t) + '<rt>' + esc(r) + '</rt></ruby>' : esc(t))).join('');
+  };
+
+  // ---------- which script Japanese is shown in (Settings) ----------
+  // mode: 'kanji' (kanji with furigana), 'kana' (kanji swapped for their reading, katakana kept), 'kanaRomaji' (kana with romaji above), 'romaji'.
+  J.SCRIPTS = [['kanji', 'Kanji with furigana'], ['kana', 'Kana only (no kanji)'], ['kanaRomaji', 'Kana with romaji above'], ['romaji', 'Romaji only']];
+  J.asKana = (word, reading) => J.ruby(word, reading).map(([t, r]) => r || t).join('');
+  const RPUNCT = { '。': '.', '、': ',', '？': '?', '！': '!', '「': '"', '」': '"', '『': '"', '』': '"', '（': '(', '）': ')', '・': ' ', '〜': '~', '…': '...', '　': ' ' };
+  // opt.particle: the word stands alone in a sentence, so は and へ are the particles "wa" and "e"
+  J.romajiOf = (word, reading, opt) => {
+    const k = J.asKana(word, reading);
+    if (opt && opt.particle && (k === 'は' || k === 'へ')) return k === 'は' ? 'wa' : 'e';
+    return J.toRomaji(k).replace(/[。、？！「」『』（）・〜…　]/g, (c) => RPUNCT[c]);
+  };
+  J.scriptHtml = (word, reading, mode, esc, opt) => {
+    esc = esc || ((x) => String(x).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])));
+    if (mode === 'kana') return esc(J.asKana(word, reading));
+    if (mode === 'romaji') return esc(J.romajiOf(word, reading, opt));
+    if (mode === 'kanaRomaji') { const k = J.asKana(word, reading), r = J.romajiOf(word, reading, opt); return J.hasJa(k) && r !== k ? '<ruby>' + esc(k) + '<rt>' + esc(r) + '</rt></ruby>' : esc(k); }
+    return J.rubyHtml(word, reading, esc);
+  };
+  // Joins a sentence's words: [html, surface] pairs. Romaji gets a space between words, but not before punctuation.
+  J.scriptJoin = (parts, mode) => {
+    if (mode !== 'romaji') return parts.map((p) => p[0]).join('');
+    let out = '';
+    parts.forEach(([h, s], i) => { out += (i && /[\p{L}\p{N}々〆ー]/u.test(s) && !/[「『（(]$/.test(parts[i - 1][1])) ? ' ' + h : h; });
+    return out;
   };
 
   // ---------- sentences from the data file ----------

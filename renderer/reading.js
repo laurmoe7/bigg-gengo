@@ -49,8 +49,8 @@ function readHome() {
 function storyView(s) {
   const all = !!rd.all, mine = new Set();
   liveWords().forEach((w) => { mine.add(w.ja); if (w.reading) mine.add(w.reading); });
-  const toks = (p) => rdTokens(p).map((t) => (t.plain || !isWordTok(t.s) ? J.rubyHtml(t.s, t.r, esc)
-    : `<span class="rw ${mine.has(t.b) || mine.has(t.s) ? 'known' : ''} ${rd.tapS === t.s && rd.tap === t.b ? 'sel' : ''}" data-act="rd-tap" data-w="${esc(t.b)}" data-s="${esc(t.s)}">${J.rubyHtml(t.s, t.r, esc)}</span>`)).join('');
+  const toks = (p) => jpJoin(rdTokens(p).map((t) => [t.plain || !isWordTok(t.s) ? jpTok(t.s, t.r)
+    : `<span class="rw ${mine.has(t.b) || mine.has(t.s) ? 'known' : ''} ${rd.tapS === t.s && rd.tap === t.b ? 'sel' : ''}" data-act="rd-tap" data-w="${esc(t.b)}" data-s="${esc(t.s)}">${jpTok(t.s, t.r)}</span>`, t.s]));
   const paras = s.paragraphs.map((p, i) => `<div class="rd-p"><button class="ghost mini" data-act="say" data-t="${esc(p.ja)}" title="Listen">🔊</button><div class="grow"><p class="rd-nl jp">${toks(p)}</p>${all || rd.tr[i] ? `<p class="muted rd-en">${esc(p.en)}</p>` : p.en ? `<button class="ghost mini" data-act="rd-tr" data-i="${i}">Show English</button>` : ''}</div></div>`).join('');
   let tap = '';
   if (rd.tap) {

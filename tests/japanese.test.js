@@ -36,6 +36,20 @@ test('hiragana to romaji', () => {
   assert.equal(J.toRomaji('ちょっと'), 'chotto');
   assert.equal(J.toRomaji('ほんや'), "hon'ya");
 });
+test('showing Japanese as kanji, kana or romaji', () => {
+  assert.equal(J.toRomaji('コーヒー'), 'koohii');
+  assert.equal(J.asKana('食べる', 'たべる'), 'たべる');
+  assert.equal(J.asKana('コーヒー店', 'こーひーてん'), 'コーヒーてん');
+  assert.equal(J.scriptHtml('食べる', 'たべる', 'kanji'), '<ruby>食<rt>た</rt></ruby>べる');
+  assert.equal(J.scriptHtml('食べる', 'たべる', 'kana'), 'たべる');
+  assert.equal(J.scriptHtml('食べる', 'たべる', 'romaji'), 'taberu');
+  assert.equal(J.scriptHtml('食べる', 'たべる', 'kanaRomaji'), '<ruby>たべる<rt>taberu</rt></ruby>');
+  assert.equal(J.scriptHtml('は', '', 'romaji', null, { particle: true }), 'wa');
+  assert.equal(J.scriptHtml('は', '', 'romaji'), 'ha');
+  const parts = [['watashi', '私'], ['wa', 'は'], ['gakusei', '学生'], ['desu', 'です'], ['.', '。']];
+  assert.equal(J.scriptJoin(parts, 'romaji'), 'watashi wa gakusei desu.');
+  assert.equal(J.scriptJoin(parts, 'kana'), 'watashiwagakuseidesu.');
+});
 test('normalising: kana script, romaji, spaces and punctuation do not matter', () => {
   assert.equal(J.norm('タベル'), 'たべる');
   assert.equal(J.norm('taberu'), 'たべる');

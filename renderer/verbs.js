@@ -79,9 +79,9 @@ function gramRuby(html, marks) {
   return out;
 }
 VIEWS.grammar = () => {
-  const tabs = `<div class="tabs">${[['sheets', '🧠 Cheat sheets'], ['verbs', '🔧 Conjugation practice']].map(([id, n]) => `<button class="tab ${ui.grTab === id ? 'on' : ''}" data-act="gr-tab" data-v="${id}">${n}</button>`).join('')}</div>`;
+  const tabs = `<div class="tabs">${[['sheets', '🧠 Cheat sheets'], ['verbs', '🔧 Conjugation practice'], ['build', '🧩 Sentence builder']].map(([id, n]) => `<button class="tab ${ui.grTab === id ? 'on' : ''}" data-act="gr-tab" data-v="${id}">${n}</button>`).join('')}</div>`;
   const head = '<div class="top"><div><h1>Grammar</h1></div></div>' + tabs;
-  return head + (ui.grTab === 'verbs' ? vtView() : `<div class="grid g2 gram">${GRAMMAR.map((g, gi) => `<div class="card"><h3>${g.t}</h3>${g.b.map((p, pi) => `<p>${gramRuby(p, ((typeof GRAMMAR_RUBY !== 'undefined' && GRAMMAR_RUBY[gi]) || [])[pi])}</p>`).join('')}</div>`).join('')}</div>`);
+  return head + (ui.grTab === 'verbs' ? vtView() : ui.grTab === 'build' ? sbView() : `<div class="grid g2 gram">${GRAMMAR.map((g, gi) => `<div class="card"><h3>${g.t}</h3>${g.b.map((p, pi) => `<p>${gramRuby(p, ((typeof GRAMMAR_RUBY !== 'undefined' && GRAMMAR_RUBY[gi]) || [])[pi])}</p>`).join('')}</div>`).join('')}</div>`);
 };
 Object.assign(ACT, {
   'gr-tab': (el) => { ui.grTab = el.dataset.v; render(); },

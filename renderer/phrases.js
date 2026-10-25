@@ -27,7 +27,7 @@ function phAll() { // every phrase, with the sentences made from the patterns at
   return (phCache = out);
 }
 // a phrase with furigana
-const phHtml = (p) => (p.tok ? sentHtml(p.ja, p.tok) : p.frame ? esc(p.frame[0]) + jp(p.swap[0], p.swap[1]) + esc(p.frame[1]) : esc(p.ja));
+const phHtml = (p) => (p.tok ? sentHtml(p.ja, p.tok) : p.frame ? jp(p.frame[0], '') + jp(p.swap[0], p.swap[1]) + jp(p.frame[1], '') : jp(p.ja, ''));
 const phRec = (p) => (S.phrases && S.phrases[p.id]) || {};
 const phIsDue = (p) => { const r = phRec(p); return r.reps > 0 && L.isDue(r, today()); };
 const phIsNew = (p) => !phRec(p).reps;
@@ -47,9 +47,9 @@ function phGapHtml(p) { // the Japanese sentence with the hidden word as a gap (
   if (i < 0) return phHtml(p);
   const gap = '<span class="vt-gap">＿＿＿</span>', toks = p.tok ? J.tokens([p.ja, '', p.tok]) : null;
   if (toks && toks.map((t) => t.s).join('') === p.ja) {
-    let pos = 0, done = false, out = '', clean = true;
-    for (const t of toks) { const a = pos, b = (pos += t.s.length); if (b <= i || a >= i + f.length) out += J.rubyHtml(t.s, t.r, esc); else if (a >= i && b <= i + f.length) { if (!done) { out += gap; done = true; } } else clean = false; }
-    if (clean) return out;
+    let pos = 0, done = false, clean = true; const out = [];
+    for (const t of toks) { const a = pos, b = (pos += t.s.length); if (b <= i || a >= i + f.length) out.push([jpTok(t.s, t.r), t.s]); else if (a >= i && b <= i + f.length) { if (!done) { out.push([gap, 'gap']); done = true; } } else clean = false; }
+    if (clean) return jpJoin(out);
   }
   return esc(p.ja.slice(0, i)) + gap + esc(p.ja.slice(i + f.length));
 }
@@ -149,10 +149,10 @@ function phSession() {
   const coach = `<div class="coach">${pigSvg('happy', act, { stage: pigStage(), card: true })}<div class="cbub"><span>${esc(co.line || '')}</span>${s.last ? `<small class="lastw jp">${s.last.ok ? '✓' : '→'} ${phHtml(s.last.p)}</small>` : ''}</div></div>`;
   const target = kind === 'fill' ? p.fill : p.ja, hintTarget = kind === 'fill' ? p.fillR || p.fill : p.kana;
   const hintLine = `<div class="fc-hint" id="ph-hint">${s.hint ? esc(L.hintText(hintTarget, s.hint)) : ''}</div>`;
-  const front = jaFront ? `<div class="ph-big jp">${phHtml(p)}</div>${speakBtn(p.ja)}`
+  const front = jaFront ? `<div class="ph-big jp">${noRomaji(() => phHtml(p))}</div>${speakBtn(p.ja)}`
     : kind === 'fill' ? `<div class="muted">${esc(p.en)}</div><div class="ph-big jp">${phGapHtml(p)}</div>${hintLine}`
     : `<div class="ph-big">${esc(p.en)}</div><div class="muted">in Japanese</div>${kind === 'type' ? hintLine : ''}`;
-  const verdict = s.res === 'close' ? '<div class="warn">Almost! Check the kana.</div>' : s.res === 'wrong' ? `<div class="warn">${s.typed ? 'You typed: ' + esc(s.typed) : 'That is okay, here it is!'}</div>` : '';
+  const verdict = s.res === 'close' ? spellNote(s.typed, kind === 'fill' ? [p.fill, p.fillR] : [p.ja, p.kana], 'Almost! Check the kana.') : s.res === 'wrong' ? `<div class="warn">${s.typed ? 'You typed: ' + esc(s.typed) : 'That is okay, here it is!'}</div>` : '';
   const back = jaFront ? `<div class="ph-big">${esc(p.en)}</div><div class="fc-ex jp">${phHtml(p)}</div>`
     : `<div class="ph-big jp ${s.res ? 'ans ' + s.res : ''}">${phHtml(p)}</div>${speakBtn(p.ja)}<div class="fc-ex">${esc(p.en)}</div>${verdict}`;
   const sug = s.res === 'wrong' ? 'again' : 'good', iv = L.previewIntervals(phRec(p), today()), hk = hotkeys();
